@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "1046134350763",
+    "project_id": "silentvoice-d2119",
+    "storage_bucket": "silentvoice-d2119.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1046134350763:android:82bdf0301ef021c0b368ee",
+        "android_client_info": {
+          "package_name": "com.fyp.silentvoice"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1046134350763-bafhil46d3ft7uqobqm7hrvlr0vadv7n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABU7hO89wNAj22VzWpnfF64GIjtTl1xo8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1046134350763-bafhil46d3ft7uqobqm7hrvlr0vadv7n.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1046134350763:android:775d0dbb64b57b60b368ee",
+        "android_client_info": {
+          "package_name": "com.silentvoice"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1046134350763-bafhil46d3ft7uqobqm7hrvlr0vadv7n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABU7hO89wNAj22VzWpnfF64GIjtTl1xo8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1046134350763-bafhil46d3ft7uqobqm7hrvlr0vadv7n.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
