@@ -6,7 +6,8 @@ import base64
 import os
 
 from gesture import GestureRecognizer
-from voice import speech_to_text, translate_text   # 👈 IMPORT VOICE MODULE
+from voice import speech_to_text, translate_text
+from labels_urdu import translate as translate_label   # 👈 NEW
 
 app = Flask(__name__)
 CORS(app)
@@ -34,18 +35,44 @@ def decode_image(data):
 def gesture():
 
     data = request.json.get("image")
+    lang = request.json.get("lang", "en")   # 👈 NEW: "en" or "ur"
     frame = decode_image(data)
 
     if frame is not None:
         cv2.imwrite("debug.jpg", frame)
 
     result = detector.detect(frame)
+    display = translate_label(result, lang)   # 👈 NEW
 
-    return jsonify({"gesture": result})
+    return jsonify({
+        "gesture": result,    # raw English label
+        "display": display    # translated label to show/speak
+    })
 
+
+@app.route("/gesture-video", methods=["POST"])
+def gesture_video():
+    if 'file' not in request.files:
+        return jsonify({"error": "No video file"})
+
+    file = request.files['file']
+    lang = request.form.get("lang", "en")
+
+    video_path = "temp_video.mp4"
+    file.save(video_path)
+
+    result = detector.detect_from_video(video_path)
+    display = translate_label(result, lang)
+
+    os.remove(video_path)
+
+    return jsonify({
+        "gesture": result,
+        "display": display
+    })
 
 # =========================
-# VOICE ROUTE (NEW)
+# VOICE ROUTE
 # =========================
 @app.route("/voice", methods=["POST"])
 def voice():
