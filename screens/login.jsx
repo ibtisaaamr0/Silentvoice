@@ -6,38 +6,47 @@ import {
   Text,
   Pressable,
   Alert,
-  ActivityIndicator, // Added for loading feedback
+  ActivityIndicator,
+  Dimensions,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import * as Animatable from "react-native-animatable";
-import Logo from "../logo.png";
-
-// REDUX IMPORTS
 import { useDispatch, useSelector } from "react-redux";
 import { loginUser } from "../Redux/features/authSlice";
+import Logo from "../logo.png";
+
+const { width } = Dimensions.get("window");
 
 export default function Login({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Redux Hooks
   const dispatch = useDispatch();
   const { isLoading } = useSelector((state) => state.auth);
+  const isDarkMode = useSelector((state) => state.theme?.isDarkMode);
+
+  // --- Theme Synced Palette ---
+  const colors = {
+    bg: isDarkMode ? "#0F172A" : "#F8FAFC",
+    card: isDarkMode ? "#1E293B" : "#FFFFFF",
+    text: isDarkMode ? "#F1F5F9" : "#0F172A",
+    subtext: isDarkMode ? "#94A3B8" : "#64748B",
+    primary: "#6366F1",
+    border: isDarkMode ? "#334155" : "#E2E8F0",
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
-
-    // Dispatch the loginUser thunk
     const resultAction = await dispatch(loginUser({ email, password }));
-
     if (loginUser.fulfilled.match(resultAction)) {
-      // Success: Navigate to Tabs
       navigation.navigate("Tabs");
     } else {
-      // Error: Show the error message from Redux
       Alert.alert("Login Error", resultAction.payload || "Something went wrong");
     }
   };
@@ -45,123 +54,192 @@ export default function Login({ navigation }) {
   const isFilled = email.trim() !== "" && password.trim() !== "" && !isLoading;
 
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={["#b42f2f", "#FF6A3D"]} style={styles.header}>
-        <Animatable.Image
-          animation="zoomIn"
-          duration={800}
-          delay={200}
-          source={Logo}
-          style={styles.logo}
-        />
-        <Animatable.Text animation="fadeInDown" delay={400} style={styles.title}>
-          Silent Voice
-        </Animatable.Text>
-      </LinearGradient>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1, backgroundColor: colors.bg }}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+        
+        {/* --- Logo & Header --- */}
+        <View style={styles.headerSection}>
+          <Animatable.Image
+            animation="bounceIn"
+            duration={1500}
+            source={Logo}
+            style={styles.logo}
+          />
+          <Animatable.Text animation="fadeIn" delay={300} style={[styles.brandName, { color: colors.text }]}>
+            Silent Voice
+          </Animatable.Text>
+          <Text style={[styles.tagline, { color: colors.subtext }]}>Your communication bridge awaits.</Text>
+        </View>
 
-      <Animatable.View animation="fadeInUp" delay={500} style={styles.bottomCard}>
-        <Text style={styles.heading}>Welcome Back 👋</Text>
-        <Text style={styles.subtext}>Log in to continue your journey</Text>
+        {/* --- Login Form --- */}
+        <Animatable.View animation="fadeInUp" duration={800} style={styles.formCard}>
+          <Text style={[styles.heading, { color: colors.text }]}>Welcome Back 👋</Text>
+          <Text style={[styles.subtext, { color: colors.subtext }]}>Log in to continue your journey</Text>
 
-        <Text style={styles.label}>Email</Text>
-        <TextInput
-          placeholder="Enter your email"
-          placeholderTextColor="#888"
-          value={email}
-          onChangeText={setEmail}
-          style={styles.input}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          editable={!isLoading} // Disable input while loading
-        />
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+            <TextInput
+              placeholder="name@example.com"
+              placeholderTextColor={colors.subtext}
+              value={email}
+              onChangeText={setEmail}
+              style={[styles.input, { backgroundColor: colors.card, color: colors.text, borderColor: colors.border }]}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              editable={!isLoading}
+            />
+          </View>
 
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          placeholder="Enter your password"
-          placeholderTextColor="#888"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-          style={styles.input}
-          editable={!isLoading} // Disable input while loading
-        />
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.text }]}>Password</Text>
+            <TextInput
+              placeholder="Enter your password"
+              placeholderTextColor={colors.subtext}
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+              style={[styles.input, { backgroundColor: colors.card, color: colors.text, borderColor: colors.border }]}
+              editable={!isLoading}
+            />
+          </View>
 
-        <Pressable
-          style={[styles.button, { opacity: isFilled ? 1 : 0.6 }]}
-          onPress={handleLogin}
-          disabled={!isFilled}
-        >
-          <LinearGradient
-            colors={isFilled ? ["#FF6A3D", "#b42f2f"] : ["#ffb5a0", "#d28c8c"]}
-            style={styles.gradientButton}
+          <Pressable onPress={() => navigation.navigate("ForgotPass")} style={styles.forgotBtn}>
+            <Text style={[styles.forgotText, { color: colors.primary }]}>Forgot Password?</Text>
+          </Pressable>
+
+          {/* --- Login Button --- */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              { opacity: isFilled ? (pressed ? 0.9 : 1) : 0.6, transform: [{ scale: pressed ? 0.98 : 1 }] }
+            ]}
+            onPress={handleLogin}
+            disabled={!isFilled}
           >
-            {isLoading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Log In</Text>
-            )}
-          </LinearGradient>
-        </Pressable>
+            <LinearGradient
+              colors={["#6366F1", "#8B5CF6"]}
+              style={styles.gradientButton}
+            >
+              {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log In</Text>}
+            </LinearGradient>
+          </Pressable>
 
-        <Pressable
-          onPress={() => navigation.navigate("ForgotPass")}
-          style={styles.forgotPassContainer}
-        >
-          <Text style={styles.forgotPassText}>Forgot Password?</Text>
-        </Pressable>
-
-        <Text style={styles.signupText}>Don't have an account?</Text>
-
-        <Pressable
-          style={styles.signupButton}
-          onPress={() => navigation.navigate("Signup")}
-          disabled={isLoading}
-        >
-          <Text style={styles.signupButtonText}>Sign Up</Text>
-        </Pressable>
-      </Animatable.View>
-    </View>
+          {/* --- Footer --- */}
+          <View style={styles.footer}>
+            <Text style={[styles.footerText, { color: colors.subtext }]}>Don't have an account? </Text>
+            <Pressable onPress={() => navigation.navigate("Signup")}>
+              <Text style={[styles.signupLink, { color: colors.primary }]}>Sign Up</Text>
+            </Pressable>
+          </View>
+        </Animatable.View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ffececff" },
-  header: {
-    height: "40%",
-    alignItems: "center",
+  scrollContainer: {
+    flexGrow: 1,
+    paddingHorizontal: 25,
     justifyContent: "center",
-    borderBottomLeftRadius: 50,
-    borderBottomRightRadius: 50,
+    paddingBottom: 40,
   },
-  logo: { width: 100, height: 100, borderRadius: 25, marginBottom: 10 },
-  title: { fontSize: 24, color: "#fff", fontWeight: "700" },
-  bottomCard: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
-    marginTop: -40,
-    padding: 25,
-    elevation: 8,
+  headerSection: {
+    alignItems: "center",
+    marginBottom: 40,
+    marginTop: 50,
   },
-  heading: { fontSize: 22, fontWeight: "700", color: "#b42f2f", textAlign: "center" },
-  subtext: { fontSize: 13, color: "#777", textAlign: "center", marginBottom: 25 },
-  label: { fontWeight: "600", color: "#333", marginTop: 10 },
-  input: { backgroundColor: "#f5f5f5", borderRadius: 15, padding: 12, marginTop: 8 },
-  button: { marginTop: 25, borderRadius: 20, overflow: "hidden" },
-  gradientButton: { paddingVertical: 14, alignItems: "center", borderRadius: 20 },
-  buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  forgotPassContainer: { marginTop: 15, alignItems: "center" },
-  forgotPassText: { color: "#b42f2f", fontWeight: "600" },
-  signupText: { textAlign: "center", marginTop: 20, color: "#444" },
-  signupButton: {
-    marginTop: 12,
-    backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: "#b42f2f",
+  logo: {
+    width: 90,
+    height: 90,
+    borderRadius: 22,
+    marginBottom: 15,
+  },
+  brandName: {
+    fontSize: 26,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+  },
+  tagline: {
+    fontSize: 14,
+    fontWeight: "500",
+    marginTop: 4,
+  },
+  formCard: {
+    width: "100%",
+  },
+  heading: {
+    fontSize: 22,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  subtext: {
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 30,
+    marginTop: 5,
+  },
+  inputGroup: {
+    marginBottom: 18,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  input: {
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 15,
+    fontWeight: "500",
+    borderWidth: 1,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.02,
+    shadowRadius: 5,
+  },
+  forgotBtn: {
+    alignSelf: "flex-end",
+    marginBottom: 25,
+  },
+  forgotText: {
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  button: {
     borderRadius: 20,
-    paddingVertical: 12,
+    overflow: "hidden",
+    elevation: 6,
+    shadowColor: "#6366F1",
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  gradientButton: {
+    paddingVertical: 16,
     alignItems: "center",
   },
-  signupButtonText: { color: "#b42f2f", fontWeight: "700" },
+  buttonText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 16,
+    letterSpacing: 0.5,
+  },
+  footer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 30,
+  },
+  footerText: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  signupLink: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
 });
