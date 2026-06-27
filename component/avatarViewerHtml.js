@@ -340,13 +340,19 @@ const createViewerHtml = modelUris => `
         _vC.normalize();
 
         if (ARM_BONES.indexOf(boneName) !== -1) {
-          const isLeft = boneName.toLowerCase().indexOf('left') !== -1;
-          _vA.set(isLeft ? -1 : 1, 0, 0);
-          // Scale z to 0.2: pose_world_landmarks captures real metric depth so arms
-          // aimed toward camera during recording have z~0.5-0.9, making the avatar
-          // reach at the viewer. Scaling preserves x/y direction while flattening depth.
+          // Parent-local +Y: same approach that works for fingers, unified for all bones.
+          // Arms in standard rigs (Mixamo/humanoid) grow along local +Y.
+          // Scale z*0.2 to suppress metric depth from pose_world_landmarks.
+          if (!bone.parent) return;
+          bone.parent.updateMatrixWorld(true);
+          bone.parent.getWorldQuaternion(_qA);
+          _qB.copy(_qA).invert();
           _vC.set(fd.x, fd.y, fd.z * 0.2).normalize();
-          bone.quaternion.setFromUnitVectors(_vA, _vC);
+          _vB.copy(_vC).applyQuaternion(_qB).normalize();
+          const armDelta = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(0, 1, 0), _vB
+          );
+          bone.quaternion.copy(clampQuatDelta(armDelta, getClamp(boneName)));
           bone.updateMatrixWorld(true);
         } else if (boneName === 'rightHand' || boneName === 'leftHand') {
           // WRIST -> full 3-axis rotation: uses palm normal for roll/twist.
