@@ -5,6 +5,19 @@ import numpy as np
 from collections import deque, Counter
 
 
+def normalize_landmarks(landmarks_flat):
+    """Must match the normalization used during training exactly."""
+    landmarks = np.array(landmarks_flat).reshape(21, 3)
+    wrist = landmarks[0].copy()
+    landmarks = landmarks - wrist
+
+    max_dist = np.max(np.linalg.norm(landmarks, axis=1))
+    if max_dist > 0:
+        landmarks = landmarks / max_dist
+
+    return landmarks.flatten()
+
+
 class GestureRecognizer:
     def __init__(self, model_path="model/sign_model.pkl"):
         self.buffer = deque(maxlen=7)
@@ -19,7 +32,6 @@ class GestureRecognizer:
             self.model = pickle.load(f)
 
     def detect(self, frame):
-        # used by /gesture (single frame)
         if frame is None:
             return "No Frame"
         frame = cv2.flip(frame, 1)
@@ -28,10 +40,10 @@ class GestureRecognizer:
         gesture = "No Hand"
         if results.multi_hand_landmarks:
             lm = results.multi_hand_landmarks[0].landmark
-            features = []
+            raw_features = []
             for point in lm:
-                features.extend([point.x, point.y, point.z])
-            features = np.array(features).reshape(1, -1)
+                raw_features.extend([point.x, point.y, point.z])
+            features = normalize_landmarks(raw_features).reshape(1, -1)  # 👈 NEW
             gesture = self.model.predict(features)[0]
         self.buffer.append(gesture)
         return max(set(self.buffer), key=self.buffer.count)
@@ -53,28 +65,28 @@ class GestureRecognizer:
 
             if results.multi_hand_landmarks:
                 lm = results.multi_hand_landmarks[0].landmark
-                features = []
+                raw_features = []
                 for point in lm:
-                    features.extend([point.x, point.y, point.z])
-                features = np.array(features).reshape(1, -1)
+                    raw_features.extend([point.x, point.y, point.z])
+                features = normalize_landmarks(raw_features).reshape(1, -1)  # 👈 NEW
 
                 probs = self.model.predict_proba(features)[0]
                 best_idx = np.argmax(probs)
                 confidence = probs[best_idx]
                 pred = self.model.classes_[best_idx]
 
-                print(f"Frame {frame_num}: {pred} (confidence: {confidence:.2f})")  # 👈 DEBUG
+                print(f"Frame {frame_num}: {pred} (confidence: {confidence:.2f})")
 
-                if confidence > 0.5:
+                if confidence > 0.45:
                     predictions.append(pred)
             else:
-                print(f"Frame {frame_num}: no hand detected")  # 👈 DEBUG
+                print(f"Frame {frame_num}: no hand detected")
 
         cap.release()
 
-        if not predictions:
-            return "No Hand Detected"
+        if not predictions or len(predictions) < 5:
+            return "Sign not recognized - try again"
 
         most_common = Counter(predictions).most_common(1)[0][0]
-        print(f"Final votes: {Counter(predictions)}")  # 👈 DEBUG
+        print(f"Final votes: {Counter(predictions)}")
         return most_common

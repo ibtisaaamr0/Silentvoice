@@ -1,36 +1,44 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
   PermissionsAndroid,
   Platform,
 } from "react-native";
+import AudioRecord from "react-native-audio-record";
+import Tts from "react-native-tts";
 
-import Voice from "@react-native-voice/voice";
-import axios from "axios";
+const BACKEND_URL = "http://192.168.100.190:8080/voice";
 
-const BACKEND_URL = "http://192.168.100.185:8080/voice";
+const STATE_IDLE = "idle";
+const STATE_RECORDING = "recording";
+const STATE_PROCESSING = "processing";
+const STATE_RESULT = "result";
 
-export default function VoiceScreen() {
-  const [recording, setRecording] = useState(false);
-  const [spokenText, setSpokenText] = useState("");
+const audioOptions = {
+  sampleRate: 16000,
+  channels: 1,
+  bitsPerSample: 16,
+  audioSource: 6,
+  wavFile: "voice.wav",
+};
+
+export default function Voice() {
+  const [screenState, setScreenState] = useState(STATE_IDLE);
+  const [originalText, setOriginalText] = useState("");
   const [translatedText, setTranslatedText] = useState("");
-  const [lang, setLang] = useState("ur");
-  const [loading, setLoading] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [audioPath, setAudioPath] = useState(null);
 
   useEffect(() => {
-    Voice.onSpeechResults = onSpeechResults;
-
-    requestPermissions();
-
-    return () => {
-      Voice.destroy().then(Voice.removeAllListeners);
-    };
+    requestPermission();
+    AudioRecord.init(audioOptions);
   }, []);
 
-  const requestPermissions = async () => {
+  const requestPermission = async () => {
     if (Platform.OS === "android") {
       await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
@@ -38,192 +46,232 @@ export default function VoiceScreen() {
     }
   };
 
-  const onSpeechResults = (e) => {
-    const text = e.value?.[0] || "";
-    setSpokenText(text);
-  };
-
-  const startRecording = async () => {
-    setSpokenText("");
-    setTranslatedText("");
-    setRecording(true);
-
+  const handleStartRecording = async () => {
+    setScreenState(STATE_RECORDING);
     try {
-      await Voice.start("en-US");
-    } catch (e) {
-      console.log(e);
+      AudioRecord.start();
+    } catch (err) {
+      console.log("Start recording error:", err);
+      setScreenState(STATE_IDLE);
     }
   };
 
-  const stopRecording = async () => {
-    setRecording(false);
-
+  const handleStopRecording = async () => {
     try {
-      await Voice.stop();
-    } catch (e) {
-      console.log(e);
+      const filePath = await AudioRecord.stop();
+      setAudioPath(filePath);
+      setScreenState(STATE_PROCESSING);
+      await sendAudio(filePath);
+    } catch (err) {
+      console.log("Stop recording error:", err);
+      setScreenState(STATE_IDLE);
     }
   };
 
-  // 🔥 MANUAL TRANSLATE BUTTON (FIXED RELIABILITY)
-  const translateText = async () => {
-    if (!spokenText) return;
-
+  const sendAudio = async (filePath) => {
     try {
-      setLoading(true);
+      const formData = new FormData();
+      formData.append("file", {
+        uri: "file://" + filePath,
+        type: "audio/wav",
+        name: "voice.wav",
+      });
+      formData.append("lang", "en");
 
-      const res = await axios.post(BACKEND_URL, {
-        text: spokenText,
-        lang: lang,
+      const res = await fetch(BACKEND_URL, {
+        method: "POST",
+        body: formData,
+        headers: { "Content-Type": "multipart/form-data" },
       });
 
-      setTranslatedText(res.data.translated);
+      const json = await res.json();
+      setOriginalText(json.original || "No speech detected");
+      setTranslatedText("");
+      setScreenState(STATE_RESULT);
     } catch (err) {
-      setTranslatedText("❌ Translation failed");
-    } finally {
-      setLoading(false);
+      console.log("Upload error:", err.message);
+      setOriginalText("⚠️ Connection error, try again");
+      setTranslatedText("");
+      setScreenState(STATE_RESULT);
     }
+  };
+
+  const handleTranslate = async () => {
+    if (!audioPath) return;
+    setIsTranslating(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", {
+        uri: "file://" + audioPath,
+        type: "audio/wav",
+        name: "voice.wav",
+      });
+      formData.append("lang", "ur");
+
+      const res = await fetch(BACKEND_URL, {
+        method: "POST",
+        body: formData,
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      const json = await res.json();
+      setTranslatedText(json.translated || "Translation unavailable");
+    } catch (err) {
+      console.log("Translate error:", err.message);
+      setTranslatedText("⚠️ Translation failed");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const handleRecordAgain = () => {
+    setOriginalText("");
+    setTranslatedText("");
+    setScreenState(STATE_IDLE);
+  };
+
+  const speakOriginal = () => {
+    Tts.setDefaultLanguage("en-US");
+    Tts.speak(originalText);
+  };
+
+  const speakTranslated = () => {
+    Tts.setDefaultLanguage("ur-PK");
+    Tts.speak(translatedText);
   };
 
   return (
     <View style={styles.container}>
+      <Text style={styles.screenTitle}>Voice to Text</Text>
 
-      <Text style={styles.title}>🎙 Voice Translator</Text>
-
-      {/* LANGUAGE SELECT */}
-      <Text style={styles.label}>Select Language</Text>
-
-      <View style={styles.row}>
-        {[
-          { code: "en", label: "English" },
-          { code: "ur", label: "Urdu" },
-          { code: "pa", label: "Punjabi" },
-        ].map((item) => (
-          <TouchableOpacity
-            key={item.code}
-            onPress={() => setLang(item.code)}
-            style={[
-              styles.langBtn,
-              lang === item.code && styles.activeLang,
-            ]}
-          >
-            <Text style={{ color: "white" }}>{item.label}</Text>
+      {screenState === STATE_IDLE && (
+        <View style={styles.centerPanel}>
+          <View style={styles.iconCircle}>
+            <Text style={styles.iconEmoji}>🎙️</Text>
+          </View>
+          <Text style={styles.hint}>Tap to record your voice</Text>
+          <TouchableOpacity style={styles.recordButton} onPress={handleStartRecording}>
+            <View style={styles.recordDot} />
+            <Text style={styles.recordText}>Start Recording</Text>
           </TouchableOpacity>
-        ))}
-      </View>
+        </View>
+      )}
 
-      {/* MIC BUTTON */}
-      <TouchableOpacity
-        style={[
-          styles.mic,
-          recording && { backgroundColor: "#990000" },
-        ]}
-        onPress={recording ? stopRecording : startRecording}
-      >
-        <Text style={{ color: "white", fontWeight: "bold" }}>
-          {recording ? "Stop Recording" : "Start Speaking"}
-        </Text>
-      </TouchableOpacity>
+      {screenState === STATE_RECORDING && (
+        <View style={styles.centerPanel}>
+          <View style={styles.recordingIndicator}>
+            <View style={styles.recordingPulse} />
+            <Text style={styles.recordingLabel}>Listening...</Text>
+          </View>
+          <TouchableOpacity style={styles.stopButton} onPress={handleStopRecording}>
+            <View style={styles.stopSquare} />
+            <Text style={styles.recordText}>Stop Recording</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-      {/* TRANSLATE BUTTON */}
-      <TouchableOpacity
-        style={styles.translateBtn}
-        onPress={translateText}
-      >
-        <Text style={{ color: "white", fontWeight: "bold" }}>
-          {loading ? "Translating..." : "Translate"}
-        </Text>
-      </TouchableOpacity>
+      {screenState === STATE_PROCESSING && (
+        <View style={styles.centerPanel}>
+          <ActivityIndicator size="large" color="#6366F1" />
+          <Text style={styles.translatingText}>Transcribing speech...</Text>
+        </View>
+      )}
 
-      {/* OUTPUT BOXES */}
-      <View style={styles.box}>
-        <Text style={styles.heading}>You said:</Text>
-        <Text style={styles.text}>
-          {spokenText || "Speak something..."}
-        </Text>
-      </View>
+      {screenState === STATE_RESULT && (
+        <View style={styles.centerPanel}>
+          <View style={styles.resultBox}>
+            <Text style={styles.resultLabel}>You said</Text>
+            <Text style={styles.resultText}>{originalText}</Text>
+            <TouchableOpacity style={styles.speakButtonSmall} onPress={speakOriginal}>
+              <Text style={styles.speakTextSmall}>🔊 Speak</Text>
+            </TouchableOpacity>
+          </View>
 
-      <View style={styles.box}>
-        <Text style={styles.heading}>Translated:</Text>
-        <Text style={styles.text}>
-          {translatedText || "Translation will appear here"}
-        </Text>
-      </View>
+          {!translatedText && (
+            <TouchableOpacity
+              style={styles.translateButton}
+              onPress={handleTranslate}
+              disabled={isTranslating}
+            >
+              {isTranslating ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.translateText}>🌐 Translate to Urdu</Text>
+              )}
+            </TouchableOpacity>
+          )}
 
+          {translatedText && (
+            <View style={[styles.resultBox, { marginTop: 16, borderColor: "#10B981" }]}>
+              <Text style={styles.resultLabel}>Urdu Translation</Text>
+              <Text style={[styles.resultText, { writingDirection: "rtl" }]}>
+                {translatedText}
+              </Text>
+              <TouchableOpacity style={styles.speakButtonSmall} onPress={speakTranslated}>
+                <Text style={styles.speakTextSmall}>🔊 Speak</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.recordButton} onPress={handleRecordAgain}>
+            <Text style={styles.recordText}>Record Again</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0f0f0f",
-    padding: 20,
-    justifyContent: "center",
+  container: { flex: 1, backgroundColor: "#0F172A", padding: 20, paddingTop: 70 },
+  screenTitle: { color: "#F1F5F9", fontSize: 22, fontWeight: "800", marginBottom: 30, textAlign: "center" },
+  centerPanel: { alignItems: "center", flex: 1, justifyContent: "center" },
+  iconCircle: {
+    width: 90, height: 90, borderRadius: 45,
+    backgroundColor: "rgba(99,102,241,0.15)",
+    justifyContent: "center", alignItems: "center", marginBottom: 20,
   },
-
-  title: {
-    fontSize: 26,
-    color: "white",
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 20,
+  iconEmoji: { fontSize: 36 },
+  hint: { color: "#94A3B8", fontSize: 14, marginBottom: 24, textAlign: "center" },
+  recordButton: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    backgroundColor: "#6366F1", paddingHorizontal: 30, paddingVertical: 16, borderRadius: 30,
+    elevation: 5, marginTop: 20,
   },
-
-  label: {
-    color: "#aaa",
-    textAlign: "center",
-    marginBottom: 10,
+  recordDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: "white", marginRight: 10 },
+  recordText: { color: "white", fontWeight: "bold", fontSize: 16 },
+  stopButton: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    backgroundColor: "#F43F5E", paddingHorizontal: 30, paddingVertical: 16, borderRadius: 30, elevation: 5,
   },
-
-  row: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginBottom: 20,
+  stopSquare: { width: 14, height: 14, backgroundColor: "white", marginRight: 10, borderRadius: 3 },
+  recordingIndicator: {
+    flexDirection: "row", alignItems: "center", marginBottom: 24,
+    backgroundColor: "rgba(244,63,94,0.12)", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20,
   },
-
-  langBtn: {
-    padding: 10,
-    backgroundColor: "#222",
-    marginHorizontal: 5,
-    borderRadius: 10,
-  },
-
-  activeLang: {
-    backgroundColor: "#00bcd4",
-  },
-
-  mic: {
-    backgroundColor: "red",
-    padding: 18,
-    borderRadius: 50,
+  recordingPulse: { width: 12, height: 12, borderRadius: 6, backgroundColor: "#F43F5E", marginRight: 8 },
+  recordingLabel: { color: "#F43F5E", fontSize: 15, fontWeight: "700" },
+  translatingText: { color: "#94A3B8", fontSize: 15, marginTop: 16, fontWeight: "600" },
+  resultBox: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 18,
+    padding: 22,
+    width: "100%",
     alignItems: "center",
-    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "rgba(99,102,241,0.3)",
   },
-
-  translateBtn: {
-    backgroundColor: "#4caf50",
-    padding: 15,
-    borderRadius: 10,
-    alignItems: "center",
-    marginBottom: 25,
+  resultLabel: { color: "#94A3B8", fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
+  resultText: { color: "#F1F5F9", fontSize: 20, fontWeight: "700", textAlign: "center", lineHeight: 28 },
+  speakButtonSmall: {
+    marginTop: 14, backgroundColor: "rgba(99,102,241,0.2)",
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10,
   },
-
-  box: {
-    backgroundColor: "#1c1c1c",
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 15,
+  speakTextSmall: { color: "#A5B4FC", fontWeight: "700", fontSize: 13 },
+  translateButton: {
+    marginTop: 16, backgroundColor: "#10B981",
+    paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14,
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
   },
-
-  heading: {
-    color: "#00bcd4",
-    fontWeight: "bold",
-    marginBottom: 8,
-  },
-
-  text: {
-    color: "white",
-    fontSize: 16,
-  },
+  translateText: { color: "white", fontWeight: "700", fontSize: 15 },
 });

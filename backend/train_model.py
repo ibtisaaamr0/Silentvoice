@@ -1,3 +1,4 @@
+# train_model.py
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -21,7 +22,7 @@ model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 acc = accuracy_score(y_test, y_pred)
 
-print(f"\nAccuracy: {acc:.2%}\n")
+print(f"\n✅ Accuracy: {acc:.2%}\n")
 print("Detailed report:")
 print(classification_report(y_test, y_pred))
 
@@ -29,4 +30,4 @@ os.makedirs("model", exist_ok=True)
 with open("model/sign_model.pkl", "wb") as f:
     pickle.dump(model, f)
 
-print("Model saved to model/sign_model.pkl")
+print("✅ Model saved to model/sign_model.pkl")

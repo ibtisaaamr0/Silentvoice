@@ -3,6 +3,7 @@ import mediapipe as mp
 import pandas as pd
 import os
 import glob
+import numpy as np
 
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
@@ -16,13 +17,26 @@ VIDEO_FOLDER = "videos"
 OUTPUT_FOLDER = "dataset"
 FRAME_SKIP = 2
 
+
+def normalize_landmarks(landmarks_flat):
+    """Normalize landmarks relative to wrist position and hand size."""
+    landmarks = np.array(landmarks_flat).reshape(21, 3)
+    wrist = landmarks[0].copy()
+    landmarks = landmarks - wrist  # translate so wrist is origin
+
+    max_dist = np.max(np.linalg.norm(landmarks, axis=1))
+    if max_dist > 0:
+        landmarks = landmarks / max_dist  # scale to unit size
+
+    return landmarks.flatten().tolist()
+
+
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Recursively find ALL .mp4 files in videos/ and its subfolders
 video_files = glob.glob(f"{VIDEO_FOLDER}/**/*.mp4", recursive=True)
 
 if not video_files:
-    print(f"No .mp4 files found in {VIDEO_FOLDER}/ (including subfolders)")
+    print(f"⚠️ No .mp4 files found in {VIDEO_FOLDER}/ (including subfolders)")
     exit()
 
 print(f"Found {len(video_files)} video(s) to process.\n")
@@ -33,12 +47,7 @@ for video_path in video_files:
     label = os.path.splitext(os.path.basename(video_path))[0]
     output_path = f"{OUTPUT_FOLDER}/{label}.csv"
 
-    # Skip if already processed (saves time on re-runs)
-    if os.path.exists(output_path):
-        print(f"⏭ Skipping '{label}' (already processed)")
-        continue
-
-    print(f" Processing: {video_path} → label: '{label}'")
+    print(f"📹 Processing: {video_path} → label: '{label}'")
 
     cap = cv2.VideoCapture(video_path)
     data = []
@@ -58,11 +67,13 @@ for video_path in video_files:
 
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                landmarks = []
+                raw_landmarks = []
                 for lm in hand_landmarks.landmark:
-                    landmarks.extend([lm.x, lm.y, lm.z])
-                landmarks.append(label)
-                data.append(landmarks)
+                    raw_landmarks.extend([lm.x, lm.y, lm.z])
+
+                normalized = normalize_landmarks(raw_landmarks)  # 👈 NEW
+                normalized.append(label)
+                data.append(normalized)
 
     cap.release()
 
@@ -74,14 +85,14 @@ for video_path in video_files:
 
         df = pd.DataFrame(data, columns=columns)
         df.to_csv(output_path, index=False)
-        print(f"   Saved {len(data)} samples")
+        print(f"   ✅ Saved {len(data)} samples")
         summary.append((label, len(data)))
     else:
-        print(f"    No hand detected — check video quality/lighting")
+        print(f"   ⚠️ No hand detected")
         summary.append((label, 0))
 
 print("\n🎉 Done processing all videos!\n")
 print("=== Summary ===")
 for label, count in summary:
-    flag = "LOW" if count < 50 else "good"
+    flag = "⚠️ LOW" if count < 50 else "✅"
     print(f"{label:30s} {count:5d} samples  {flag}")
