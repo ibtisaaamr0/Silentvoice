@@ -1,206 +1,164 @@
-import React, {useEffect, useState} from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  ScrollView,
-  TouchableOpacity,
-  Platform,
-  Alert,
-  ActivityIndicator, // Added for the loading state
-} from 'react-native';
-import * as Animatable from 'react-native-animatable';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import auth from '@react-native-firebase/auth';
-import {useSelector} from 'react-redux';
-import ReactNativeBiometrics from 'react-native-biometrics'; // 1. Import library
+import React, { useState, useEffect } from "react";
+import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, Alert } from "react-native";
+import MaterialIcons from "react-native-vector-icons/MaterialIcons";
+import { useSelector, useDispatch } from "react-redux";
+import { useNavigation } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { logout } from "../Redux/features/authSlice";
+import { resetProfile } from "../Redux/features/profileSlice";
+import { loadSettings, saveSettings } from "../utils/settingsStorage";
+import { checkBiometricAvailable, authenticateWithBiometrics } from "../utils/biometricAuth";
 
-const rnBiometrics = new ReactNativeBiometrics();
-
-export default function PrivacySecurity({navigation}) {
-  const isDarkMode = useSelector(state => state.theme?.isDarkMode);
-  const user = useSelector(state => state.auth.user);
-
-  // 2. State to manage access
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+export default function PrivacySecurity() {
+  const navigation = useNavigation();
+  const dispatch = useDispatch();
+  const isDarkMode = useSelector((state) => state.theme?.isDarkMode);
+  const [settings, setSettings] = useState(null);
 
   const colors = {
-    bg: isDarkMode ? '#0F172A' : '#F8FAFC',
-    card: isDarkMode ? '#1E293B' : '#FFFFFF',
-    text: isDarkMode ? '#F1F5F9' : '#1E293B',
-    subtext: isDarkMode ? '#94A3B8' : '#64748B',
-    primary: '#6366F1',
-    border: isDarkMode ? '#334155' : '#F1F5F9',
-    danger: '#EF4444',
+    bg: isDarkMode ? "#0F172A" : "#F8FAFC",
+    card: isDarkMode ? "#1E293B" : "#FFFFFF",
+    text: isDarkMode ? "#F1F5F9" : "#1E293B",
+    subtext: isDarkMode ? "#94A3B8" : "#64748B",
+    border: isDarkMode ? "#334155" : "#E2E8F0",
+    accent: "#6366F1",
+    danger: "#EF4444",
   };
 
-  // 3. Biometric Check on Mount
   useEffect(() => {
-    handleBiometricAuth();
+    (async () => {
+      const loaded = await loadSettings();
+      setSettings(loaded);
+    })();
   }, []);
 
-  const handleBiometricAuth = async () => {
-    try {
-      const {available} = await rnBiometrics.isSensorAvailable();
-
-      if (available) {
-        const result = await rnBiometrics.simplePrompt({
-          promptMessage: 'Confirm identity to access Security',
-        });
-
-        if (result.success) {
-          setIsAuthenticated(true);
-        } else {
-          // If they cancel, send them back
-          navigation.goBack();
-        }
-      } else {
-        // If device has no biometrics, just let them in
-        setIsAuthenticated(true);
+  const handleBiometricToggle = async (value) => {
+    if (value) {
+      const available = await checkBiometricAvailable();
+      if (!available) {
+        Alert.alert("Not Available", "Your device doesn't support biometric authentication.");
+        return;
       }
-    } catch (error) {
-      console.log('Biometric Error:', error);
-      setIsAuthenticated(true); // Fallback so they aren't locked out
-    } finally {
-      setIsLoading(false);
+      const confirmed = await authenticateWithBiometrics();
+      if (!confirmed) return;
     }
+    const updated = { ...settings, biometricLock: value };
+    setSettings(updated);
+    await saveSettings(updated);
   };
 
-  // 4. Show a loader while waiting for fingerprint
-  if (isLoading) {
-    return (
-      <View style={[styles.center, {backgroundColor: colors.bg}]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{color: colors.subtext, marginTop: 10}}>
-          Authenticating...
-        </Text>
-      </View>
-    );
-  }
+  const handleSaveHistoryToggle = async (value) => {
+    const updated = { ...settings, saveHistory: value };
+    setSettings(updated);
+    await saveSettings(updated);
+  };
 
-  // 5. If auth fails/cancels, return null (handled by navigation.goBack)
-  if (!isAuthenticated) return null;
+  const handleChangePassword = () => {
+    navigation.navigate("ForgotPass");
+  };
 
-  // --- REST OF YOUR UI CODE BELOW ---
-  const securityItems = [
-    {
-      icon: 'lock-outline',
-      label: 'Change Password',
-      desc: 'Receive a reset link via email',
-      action: async () => {
-        Alert.alert('Reset Password', `Send link to ${user.email}?`, [
-          {text: 'Cancel'},
-          {
-            text: 'Send',
-            onPress: () => auth().sendPasswordResetEmail(user.email),
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "This will permanently delete your account and all saved data on this device. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            await AsyncStorage.clear();
+            dispatch(logout());
+            dispatch(resetProfile());
+            navigation.reset({ index: 0, routes: [{ name: "Login" }] });
           },
-        ]);
-      },
-    },
-    // ... other items
-  ];
+        },
+      ]
+    );
+  };
+
+  if (!settings) return null;
 
   return (
-    <View style={{flex: 1, backgroundColor: colors.bg}}>
-      {/* Render your TopBar and ScrollView here as before */}
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}>
-          <MaterialIcons name="arrow-back-ios" size={20} color={colors.text} />
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.topBarTitle, {color: colors.text}]}>
-          Privacy & Security
-        </Text>
-        <View style={{width: 40}} />
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Privacy & Security</Text>
+        <View style={{ width: 24 }} />
       </View>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Animatable.View animation="fadeIn" style={styles.headerIconContainer}>
-          <View
-            style={[
-              styles.shieldCircle,
-              {backgroundColor: colors.primary + '15'},
-            ]}>
-            <MaterialIcons name="security" size={45} color={colors.primary} />
+
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        <Text style={[styles.groupTitle, { color: colors.subtext }]}>Security</Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <View style={[styles.row, { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.accent + "15" }]}>
+              <MaterialIcons name="fingerprint" size={20} color={colors.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowLabel, { color: colors.text }]}>Biometric Lock</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.subtext }]}>Require fingerprint to open the app</Text>
+            </View>
+            <Switch
+              value={settings.biometricLock}
+              onValueChange={handleBiometricToggle}
+              trackColor={{ false: colors.border, true: colors.accent + "80" }}
+              thumbColor={settings.biometricLock ? colors.accent : "#f4f3f4"}
+            />
           </View>
-          <Text style={[styles.headerSubtitle, {color: colors.subtext}]}>
-            Your identity is verified. You can now manage sensitive settings.
-          </Text>
-        </Animatable.View>
-        {/* Map through securityItems... */}
+
+          <TouchableOpacity style={styles.row} onPress={handleChangePassword}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.accent + "15" }]}>
+              <MaterialIcons name="lock" size={20} color={colors.accent} />
+            </View>
+            <Text style={[styles.rowLabel, { color: colors.text, flex: 1 }]}>Change Password</Text>
+            <MaterialIcons name="chevron-right" size={20} color={colors.subtext} />
+          </TouchableOpacity>
+        </View>
+
+        <Text style={[styles.groupTitle, { color: colors.subtext, marginTop: 22 }]}>Data & Privacy</Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <View style={styles.row}>
+            <View style={[styles.iconSquare, { backgroundColor: colors.accent + "15" }]}>
+              <MaterialIcons name="history" size={20} color={colors.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowLabel, { color: colors.text }]}>Save Practice History</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.subtext }]}>Keep a record of signs you have practiced</Text>
+            </View>
+            <Switch
+              value={settings.saveHistory}
+              onValueChange={handleSaveHistoryToggle}
+              trackColor={{ false: colors.border, true: colors.accent + "80" }}
+              thumbColor={settings.saveHistory ? colors.accent : "#f4f3f4"}
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.groupTitle, { color: colors.subtext, marginTop: 22 }]}>Account</Text>
+        <TouchableOpacity
+          style={[styles.dangerButton, { backgroundColor: isDarkMode ? "#ef444420" : "#FEE2E2" }]}
+          onPress={handleDeleteAccount}
+        >
+          <MaterialIcons name="delete-outline" size={20} color={colors.danger} />
+          <Text style={[styles.dangerText, { color: colors.danger }]}>Delete Account</Text>
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  center: {flex: 1, justifyContent: 'center', alignItems: 'center'},
-  // ... copy the rest of your styles from previous response
-
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingHorizontal: 20,
-    paddingBottom: 15,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  topBarTitle: {fontSize: 18, fontWeight: '800'},
-
-  scrollContent: {paddingHorizontal: 20, paddingBottom: 40},
-
-  headerIconContainer: {alignItems: 'center', marginVertical: 30},
-  shieldCircle: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  headerSubtitle: {
-    textAlign: 'center',
-    fontSize: 14,
-    lineHeight: 20,
-    paddingHorizontal: 30,
-  },
-
-  groupContainer: {
-    borderRadius: 32,
-    overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 15,
-  },
-  optionRow: {flexDirection: 'row', alignItems: 'center', padding: 20},
-  iconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  textContainer: {flex: 1},
-  label: {fontSize: 16, fontWeight: '700'},
-  description: {fontSize: 12, marginTop: 2, fontWeight: '500'},
-
-  footerText: {
-    textAlign: 'center',
-    marginTop: 40,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 55, paddingBottom: 16 },
+  backButton: { padding: 4 },
+  headerTitle: { fontSize: 17, fontWeight: "700" },
+  groupTitle: { fontSize: 13, fontWeight: "700", textTransform: "uppercase", marginBottom: 10, marginLeft: 4, letterSpacing: 1 },
+  card: { borderRadius: 20, overflow: "hidden", elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10 },
+  row: { flexDirection: "row", alignItems: "center", padding: 16 },
+  iconSquare: { width: 38, height: 38, borderRadius: 12, justifyContent: "center", alignItems: "center", marginRight: 14 },
+  rowLabel: { fontSize: 15, fontWeight: "700" },
+  rowSubtitle: { fontSize: 12, fontWeight: "500", marginTop: 2 },
+  dangerButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 16, borderRadius: 16 },
+  dangerText: { fontSize: 15, fontWeight: "700", marginLeft: 10 },
 });

@@ -28,27 +28,6 @@ def decode_image(data):
         return None
 
 
-# =========================
-# GESTURE ROUTE
-# =========================
-@app.route("/gesture", methods=["POST"])
-def gesture():
-
-    data = request.json.get("image")
-    lang = request.json.get("lang", "en")   # 👈 NEW: "en" or "ur"
-    frame = decode_image(data)
-
-    if frame is not None:
-        cv2.imwrite("debug.jpg", frame)
-
-    result = detector.detect(frame)
-    display = translate_label(result, lang)   # 👈 NEW
-
-    return jsonify({
-        "gesture": result,    # raw English label
-        "display": display    # translated label to show/speak
-    })
-
 
 @app.route("/gesture-video", methods=["POST"])
 def gesture_video():

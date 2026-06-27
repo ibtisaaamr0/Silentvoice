@@ -74,6 +74,11 @@ yarn-error.log
 
 
 backend/model/sign_model.pkl
+*.pkl
+*.h5
+*.pt
+*.joblib
+backend/model/
 # Python cache
 __pycache__/
 *.pyc

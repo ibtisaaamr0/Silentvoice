@@ -1,207 +1,116 @@
-import React, {useState} from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Switch,
-  ScrollView,
-  TouchableOpacity,
-  Platform,
-} from 'react-native';
-import * as Animatable from 'react-native-animatable';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import {useSelector} from 'react-redux';
+import React, { useState, useEffect } from "react";
+import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity } from "react-native";
+import MaterialIcons from "react-native-vector-icons/MaterialIcons";
+import { useSelector } from "react-redux";
+import { useNavigation } from "@react-navigation/native";
+import { loadSettings, saveSettings } from "../utils/settingsStorage";
+import { scheduleDailyReminder, cancelReminders } from "../utils/notifications";
 
-export default function Notifications({navigation}) {
-  const isDarkMode = useSelector(state => state.theme?.isDarkMode);
-
-  // Local State
-  const [push, setPush] = useState(true);
-  const [email, setEmail] = useState(false);
-  const [updates, setUpdates] = useState(true);
+export default function Notifications() {
+  const navigation = useNavigation();
+  const isDarkMode = useSelector((state) => state.theme?.isDarkMode);
+  const [settings, setSettings] = useState(null);
 
   const colors = {
-    bg: isDarkMode ? '#0F172A' : '#F8FAFC',
-    card: isDarkMode ? '#1E293B' : '#FFFFFF',
-    text: isDarkMode ? '#F1F5F9' : '#1E293B',
-    subtext: isDarkMode ? '#94A3B8' : '#64748B',
-    primary: '#6366F1',
-    border: isDarkMode ? '#334155' : '#F1F5F9',
+    bg: isDarkMode ? "#0F172A" : "#F8FAFC",
+    card: isDarkMode ? "#1E293B" : "#FFFFFF",
+    text: isDarkMode ? "#F1F5F9" : "#1E293B",
+    subtext: isDarkMode ? "#94A3B8" : "#64748B",
+    border: isDarkMode ? "#334155" : "#E2E8F0",
+    accent: "#6366F1",
   };
 
-  const notificationItems = [
+  useEffect(() => {
+    (async () => {
+      const loaded = await loadSettings();
+      setSettings(loaded);
+    })();
+  }, []);
+
+  const toggle = async (key) => {
+    const updated = { ...settings, [key]: !settings[key] };
+    setSettings(updated);
+    await saveSettings(updated);
+
+    if (key === "practiceReminders") {
+      updated.practiceReminders ? scheduleDailyReminder() : cancelReminders();
+    }
+  };
+
+  if (!settings) return null;
+
+  const groups = [
     {
-      id: 'push',
-      label: 'Push Notifications',
-      desc: 'Instant alerts for sign recognition results.',
-      icon: 'notifications-active',
-      value: push,
-      setter: setPush,
+      title: "Learning",
+      items: [
+        { key: "practiceReminders", label: "Practice Reminders", subtitle: "Daily reminder at 6:00 PM", icon: "alarm" },
+        { key: "quizResults", label: "Quiz Results", subtitle: "Get notified when your quiz score is ready", icon: "emoji-events" },
+        { key: "newSignsAdded", label: "New Signs Added", subtitle: "Alerts when new vocabulary is available", icon: "auto-awesome" },
+      ],
     },
     {
-      id: 'email',
-      label: 'Email Alerts',
-      desc: 'Weekly progress reports and account security.',
-      icon: 'mail-outline',
-      value: email,
-      setter: setEmail,
-    },
-    {
-      id: 'updates',
-      label: 'App Updates',
-      desc: 'New gestures and avatar customization features.',
-      icon: 'system-update',
-      value: updates,
-      setter: setUpdates,
+      title: "App",
+      items: [
+        { key: "appUpdates", label: "App Updates", subtitle: "News about new features and improvements", icon: "system-update" },
+      ],
     },
   ];
 
   return (
-    <View style={{flex: 1, backgroundColor: colors.bg}}>
-      {/* --- TOP BAR --- */}
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}>
-          <MaterialIcons name="arrow-back-ios" size={20} color={colors.text} />
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.topBarTitle, {color: colors.text}]}>
-          Notifications
-        </Text>
-        <View style={{width: 40}} />
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Notifications</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        {/* --- HEADER ILLUSTRATION --- */}
-        <Animatable.View animation="fadeIn" style={styles.headerIconContainer}>
-          <View
-            style={[
-              styles.bellCircle,
-              {backgroundColor: colors.primary + '15'},
-            ]}>
-            <MaterialIcons
-              name="notifications"
-              size={45}
-              color={colors.primary}
-            />
-          </View>
-          <Text style={[styles.headerSubtitle, {color: colors.subtext}]}>
-            Choose how you want to be notified about your activity.
-          </Text>
-        </Animatable.View>
-
-        {/* --- SETTINGS GROUP --- */}
-        <Animatable.View
-          animation="fadeInUp"
-          delay={200}
-          style={[styles.groupContainer, {backgroundColor: colors.card}]}>
-          {notificationItems.map((item, index) => (
-            <View
-              key={item.id}
-              style={[
-                styles.row,
-                index !== notificationItems.length - 1 && {
-                  borderBottomWidth: 1,
-                  borderBottomColor: colors.border,
-                },
-              ]}>
-              <View style={styles.iconBox}>
-                <MaterialIcons
-                  name={item.icon}
-                  size={24}
-                  color={colors.primary}
-                />
-              </View>
-
-              <View style={styles.textContainer}>
-                <Text style={[styles.label, {color: colors.text}]}>
-                  {item.label}
-                </Text>
-                <Text style={[styles.description, {color: colors.subtext}]}>
-                  {item.desc}
-                </Text>
-              </View>
-
-              <Switch
-                value={item.value}
-                onValueChange={item.setter}
-                trackColor={{false: '#CBD5E1', true: colors.primary + '80'}}
-                thumbColor={item.value ? colors.primary : '#F1F5F9'}
-                ios_backgroundColor="#CBD5E1"
-              />
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        {groups.map((group, gIndex) => (
+          <View key={gIndex} style={styles.groupWrapper}>
+            <Text style={[styles.groupTitle, { color: colors.subtext }]}>{group.title}</Text>
+            <View style={[styles.card, { backgroundColor: colors.card }]}>
+              {group.items.map((item, iIndex) => (
+                <View
+                  key={item.key}
+                  style={[
+                    styles.row,
+                    iIndex !== group.items.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
+                  ]}
+                >
+                  <View style={[styles.iconSquare, { backgroundColor: colors.accent + "15" }]}>
+                    <MaterialIcons name={item.icon} size={20} color={colors.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.rowLabel, { color: colors.text }]}>{item.label}</Text>
+                    <Text style={[styles.rowSubtitle, { color: colors.subtext }]}>{item.subtitle}</Text>
+                  </View>
+                  <Switch
+                    value={settings[item.key]}
+                    onValueChange={() => toggle(item.key)}
+                    trackColor={{ false: colors.border, true: colors.accent + "80" }}
+                    thumbColor={settings[item.key] ? colors.accent : "#f4f3f4"}
+                  />
+                </View>
+              ))}
             </View>
-          ))}
-        </Animatable.View>
-
-        {/* --- BOTTOM TIP --- */}
-        <Animatable.View animation="fadeIn" delay={800} style={styles.tipBox}>
-          <MaterialIcons name="info-outline" size={18} color={colors.subtext} />
-          <Text style={[styles.tipText, {color: colors.subtext}]}>
-            Note: Critical security alerts cannot be disabled.
-          </Text>
-        </Animatable.View>
+          </View>
+        ))}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingHorizontal: 20,
-    paddingBottom: 15,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  topBarTitle: {fontSize: 18, fontWeight: '800'},
-
-  scrollContent: {paddingHorizontal: 20, paddingBottom: 40},
-
-  headerIconContainer: {alignItems: 'center', marginVertical: 30},
-  bellCircle: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  headerSubtitle: {
-    textAlign: 'center',
-    fontSize: 14,
-    lineHeight: 20,
-    paddingHorizontal: 30,
-  },
-
-  groupContainer: {
-    borderRadius: 32,
-    paddingVertical: 10,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 15,
-  },
-  row: {flexDirection: 'row', alignItems: 'center', padding: 20},
-  iconBox: {marginRight: 15},
-  textContainer: {flex: 1},
-  label: {fontSize: 16, fontWeight: '700'},
-  description: {fontSize: 12, marginTop: 2, fontWeight: '500'},
-
-  tipBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 30,
-  },
-  tipText: {fontSize: 12, marginLeft: 8, fontWeight: '500'},
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 55, paddingBottom: 16 },
+  backButton: { padding: 4 },
+  headerTitle: { fontSize: 17, fontWeight: "700" },
+  groupWrapper: { marginBottom: 22 },
+  groupTitle: { fontSize: 13, fontWeight: "700", textTransform: "uppercase", marginBottom: 10, marginLeft: 4, letterSpacing: 1 },
+  card: { borderRadius: 20, overflow: "hidden", elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10 },
+  row: { flexDirection: "row", alignItems: "center", padding: 16 },
+  iconSquare: { width: 38, height: 38, borderRadius: 12, justifyContent: "center", alignItems: "center", marginRight: 14 },
+  rowLabel: { fontSize: 15, fontWeight: "700" },
+  rowSubtitle: { fontSize: 12, fontWeight: "500", marginTop: 2 },
 });

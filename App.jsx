@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { 
   StyleSheet, 
   Text, 
@@ -12,10 +12,8 @@ import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
-// Animation & Gesture Imports
-import { GestureHandlerRootView, PanGestureHandler } from "react-native-gesture-handler";
+import { GestureHandlerRootView, Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { 
-  useAnimatedGestureHandler, 
   useAnimatedStyle, 
   useSharedValue, 
   withSpring, 
@@ -24,13 +22,11 @@ import Animated, {
   Extrapolate
 } from "react-native-reanimated";
 
-// REDUX IMPORTS
 import { Provider } from "react-redux";
 import { store } from "./Redux/store";
 
-// ASSETS & SCREENS
 import Logo from "./logo.png";
-import Bg1 from "./bg1.jpeg"; // Assuming Bg1 is your dark/vibrant image
+import Bg1 from "./bg1.jpeg";
 import Tabs from "./component/tabs";
 import Login from "./screens/login";
 import Signup from "./screens/signup";
@@ -40,32 +36,35 @@ import Notifications from "./screens/Notifications";
 import PrivacySecurity from "./screens/Privacy_Security";
 import HelpSupport from "./screens/Help_and_SUpport";
 import ForgotPassword from "./screens/ForgotPass";
-import AvatarSelection from "./screens/AvatarSelection";
+import Voice from "./screens/Voice";
+import TextToVoice from "./screens/text_to_voice";
+import LockScreen from "./screens/LockScreen";
+
+import { loadSettings } from "./utils/settingsStorage";
+import { configurePushNotifications, scheduleDailyReminder } from "./utils/notifications";
 
 const { width } = Dimensions.get("window");
 const SLIDER_WIDTH = width * 0.85;
 const KNOB_SIZE = 60;
-const END_POSITION = SLIDER_WIDTH - KNOB_SIZE - 12; // 12 is for padding
+const END_POSITION = SLIDER_WIDTH - KNOB_SIZE - 12;
 
 const Stack = createNativeStackNavigator();
 
-// --- MODERN GLASS SWIPE COMPONENT ---
 const SwipeSlider = ({ onSwipeComplete }) => {
   const X = useSharedValue(0);
 
-  const animatedGestureHandler = useAnimatedGestureHandler({
-    onActive: (event) => {
+  const panGesture = Gesture.Pan()
+    .onUpdate((event) => {
       X.value = Math.max(0, Math.min(event.translationX, END_POSITION));
-    },
-    onEnd: () => {
+    })
+    .onEnd(() => {
       if (X.value > END_POSITION * 0.8) {
         X.value = withSpring(END_POSITION);
         runOnJS(onSwipeComplete)();
       } else {
         X.value = withSpring(0);
       }
-    },
-  });
+    });
 
   const animatedKnobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: X.value }],
@@ -80,59 +79,88 @@ const SwipeSlider = ({ onSwipeComplete }) => {
       <Animated.Text style={[styles.sliderText, animatedTextStyle]}>
         Swipe to Enter
       </Animated.Text>
-      
-      <PanGestureHandler onGestureEvent={animatedGestureHandler}>
+
+      <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.sliderKnob, animatedKnobStyle]}>
           <FontAwesome5 name="chevron-right" size={22} color="#000" />
         </Animated.View>
-      </PanGestureHandler>
+      </GestureDetector>
     </View>
   );
 };
 
-// --- HOME SCREEN ---
 function HomeScreen({ navigation }) {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ImageBackground source={Bg1} style={styles.background} resizeMode="cover">
-        {/* Permanent dark cinematic overlay */}
-        <View style={styles.overlay}>
-          
-          <Image source={Logo} style={styles.Image} />
-          
-          <Text style={styles.text}>
-            "Breaking Barriers,{"\n"}One Sign at a Time."
-          </Text>
+    <ImageBackground source={Bg1} style={styles.background} resizeMode="cover">
+      <View style={styles.overlay}>
+        
+        <Image source={Logo} style={styles.Image} />
+        
+        <Text style={styles.text}>
+          "Breaking Barriers,{"\n"}One Sign at a Time."
+        </Text>
 
-          <View style={styles.footer}>
-            <SwipeSlider onSwipeComplete={() => navigation.navigate("Tabs")} />
-          </View>
+        <View style={styles.footer}>
+          <SwipeSlider onSwipeComplete={() => navigation.navigate("Tabs")} />
         </View>
-      </ImageBackground>
-    </GestureHandlerRootView>
+      </View>
+    </ImageBackground>
   );
 }
 
-// --- MAIN APP ---
 export default function App() {
+  const [isLocked, setIsLocked] = useState(false);
+  const [checkingLock, setCheckingLock] = useState(true);
+
+  useEffect(() => {
+    configurePushNotifications();
+    (async () => {
+      const settings = await loadSettings();
+      setIsLocked(settings.biometricLock);
+      if (settings.practiceReminders) {
+        scheduleDailyReminder();
+      }
+      setCheckingLock(false);
+    })();
+  }, []);
+
+  if (checkingLock) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={{ flex: 1, backgroundColor: "#0F172A" }} />
+      </GestureHandlerRootView>
+    );
+  }
+
+  if (isLocked) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <LockScreen onUnlock={() => setIsLocked(false)} />
+      </GestureHandlerRootView>
+    );
+  }
+
   return (
-    <Provider store={store}>
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Home" component={HomeScreen} />
-          <Stack.Screen name="Tabs" component={Tabs} />
-          <Stack.Screen name="Login" component={Login} />
-          <Stack.Screen name="Signup" component={Signup} />
-          <Stack.Screen name="SeeAll" component={SeeAll} />
-          <Stack.Screen name="AccountInfo" component={AccountInfo} />
-          <Stack.Screen name="Notification" component={Notifications} />
-          <Stack.Screen name="ForgotPass" component={ForgotPassword} />
-          <Stack.Screen name="Privacy_and_Security" component={PrivacySecurity} />
-          <Stack.Screen name="Help_and_Support" component={HelpSupport} />
-          <Stack.Screen name="AvatarSelection" component={AvatarSelection} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </Provider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Provider store={store}>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Home" component={HomeScreen} />
+            <Stack.Screen name="Tabs" component={Tabs} />
+            <Stack.Screen name="Login" component={Login} />
+            <Stack.Screen name="Signup" component={Signup} />
+            <Stack.Screen name="SeeAll" component={SeeAll} />
+            <Stack.Screen name="AccountInfo" component={AccountInfo} />
+            <Stack.Screen name="Notification" component={Notifications} />
+            <Stack.Screen name="ForgotPass" component={ForgotPassword} />
+            <Stack.Screen name="Privacy_and_Security" component={PrivacySecurity} />
+            <Stack.Screen name="Help_and_Support" component={HelpSupport} />
+            <Stack.Screen name="Voice" component={Voice} />
+            <Stack.Screen name="TextToVoice" component={TextToVoice} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </Provider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -142,7 +170,7 @@ const styles = StyleSheet.create({
     flex: 1, 
     justifyContent: "center", 
     alignItems: "center", 
-    backgroundColor: "rgba(0,0,0,0.7)", // Deep cinematic dark overlay
+    backgroundColor: "rgba(0,0,0,0.7)",
     paddingHorizontal: 20 
   },
   Image: { 
@@ -169,12 +197,11 @@ const styles = StyleSheet.create({
     width: "100%", 
     alignItems: "center" 
   },
-  // --- MODERN SLIDER STYLES ---
   sliderTrack: {
     width: SLIDER_WIDTH,
     height: 72,
     borderRadius: 36,
-    backgroundColor: "rgba(255,255,255,0.12)", // Glass effect
+    backgroundColor: "rgba(255,255,255,0.12)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
     justifyContent: "center",
@@ -188,7 +215,7 @@ const styles = StyleSheet.create({
     width: KNOB_SIZE,
     height: KNOB_SIZE,
     borderRadius: KNOB_SIZE / 2,
-    backgroundColor: "#C8E265", // Vibrant accent color
+    backgroundColor: "#C8E265",
     justifyContent: "center",
     alignItems: "center",
     shadowColor: "#C8E265",
