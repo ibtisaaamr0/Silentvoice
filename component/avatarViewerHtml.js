@@ -347,7 +347,10 @@ const createViewerHtml = modelUris => `
           bone.parent.updateMatrixWorld(true);
           bone.parent.getWorldQuaternion(_qA);
           _qB.copy(_qA).invert();
-          _vC.set(fd.x, fd.y, fd.z * 0.2).normalize();
+          // z-floor of 0.1 guarantees arms never go behind body — raw data is mostly
+          // positive z anyway; this only prevents the parent-local transform from
+          // accidentally flipping the arm backward on some signs.
+          _vC.set(fd.x, fd.y, Math.max(0.1, fd.z * 0.2)).normalize();
           _vB.copy(_vC).applyQuaternion(_qB).normalize();
           const armDelta = new THREE.Quaternion().setFromUnitVectors(
             new THREE.Vector3(0, 1, 0), _vB
@@ -471,6 +474,47 @@ const createViewerHtml = modelUris => `
       return out;
     }
 
+    // Videos contain multiple sign repetitions (performer demonstrates 2-16 times).
+    // This extracts only the FIRST clean cycle: skips idle setup, stops when arm
+    // returns to rest after the first motion — so avatar plays the sign exactly once.
+    function extractFirstCycle(frames) {
+      if (frames.length < 10) return frames;
+      // Max frames for one sign demonstration. Videos captured at ~30fps;
+      // 60 frames = ~2 seconds of real sign motion which is enough for any single sign.
+      var MAX_FRAMES = 60;
+      var MIN_SIGN   = 8;
+      var inSign     = false;
+      var signStart  = 0;
+
+      function activityScore(f) {
+        var ry = f.rightArm ? f.rightArm.y : -1;
+        var ly = f.leftArm  ? f.leftArm.y  : -1;
+        var rx = f.rightArm ? Math.abs(f.rightArm.x) : 0;
+        var lx = f.leftArm  ? Math.abs(f.leftArm.x)  : 0;
+        var yScore = Math.max(ry + 0.90, ly + 0.90);
+        var xScore = Math.max(rx, lx) * 0.5;
+        return Math.max(yScore, xScore);
+      }
+
+      var REST_THRESH = 0.08;
+      for (var i = 0; i < frames.length; i++) {
+        var score = activityScore(frames[i]);
+        if (!inSign && score > REST_THRESH) {
+          inSign    = true;
+          signStart = i;
+        } else if (inSign && score <= REST_THRESH && (i - signStart) >= MIN_SIGN) {
+          // Clean cycle end found — use detected range, capped at MAX_FRAMES
+          var start = Math.max(0, signStart - 3);
+          var end   = Math.min(frames.length, i + 4);
+          return frames.slice(start, Math.min(end, start + MAX_FRAMES));
+        }
+      }
+      // No clean return-to-rest (performer kept arm up between reps) —
+      // use first MAX_FRAMES from where the sign started (or from 0 if no start found)
+      var s = Math.max(0, signStart - 3);
+      return frames.slice(s, s + MAX_FRAMES);
+    }
+
     window.playAnimation = function(frames, fps) {
       if (!frames || !Array.isArray(frames) || !frames.length) {
         send({type: 'ANIM_ERROR', message: 'No animation frames'});
@@ -480,6 +524,7 @@ const createViewerHtml = modelUris => `
         send({type: 'ANIM_ERROR', message: 'Avatar bones not mapped yet'});
         return;
       }
+      frames = extractFirstCycle(frames);
 
       gestureActive = true;
       setIdlePlaying(false);
