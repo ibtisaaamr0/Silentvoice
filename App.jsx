@@ -40,6 +40,7 @@ import Notifications from "./screens/Notifications";
 import PrivacySecurity from "./screens/Privacy_Security";
 import HelpSupport from "./screens/Help_and_SUpport";
 import ForgotPassword from "./screens/ForgotPass";
+import AvatarSelection from "./screens/AvatarSelection";
 
 const { width } = Dimensions.get("window");
 const SLIDER_WIDTH = width * 0.85;
@@ -128,6 +129,7 @@ export default function App() {
           <Stack.Screen name="ForgotPass" component={ForgotPassword} />
           <Stack.Screen name="Privacy_and_Security" component={PrivacySecurity} />
           <Stack.Screen name="Help_and_Support" component={HelpSupport} />
+          <Stack.Screen name="AvatarSelection" component={AvatarSelection} />
         </Stack.Navigator>
       </NavigationContainer>
     </Provider>

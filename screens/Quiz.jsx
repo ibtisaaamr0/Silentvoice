@@ -1,106 +1,125 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import React, {useState} from 'react';
+import {View, Text, StyleSheet, Pressable, ScrollView} from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import * as Animatable from 'react-native-animatable';
 
 const QUESTIONS = [
   {
-    question: "What does an open palm facing forward usually signify?",
-    options: ["Stop / Hello", "Yes", "No", "Good job"],
+    question: 'What does an open palm facing forward usually signify?',
+    options: ['Stop / Hello', 'Yes', 'No', 'Good job'],
     correct: 0,
   },
   {
     question: "Which gesture is commonly used for 'Good' or 'Like'?",
-    options: ["Fist", "Thumb Up", "Open Palm", "Index Pointing"],
+    options: ['Fist', 'Thumb Up', 'Open Palm', 'Index Pointing'],
     correct: 1,
   },
   {
-    question: "A closed fist held up often represents:",
-    options: ["Solidarity / Strength", "Peace", "Hello", "Direction"],
+    question: 'A closed fist held up often represents:',
+    options: ['Solidarity / Strength', 'Peace', 'Hello', 'Direction'],
     correct: 0,
   },
 ];
 
-export default function Quiz({ navigation }) {
-    const [currentQ, setCurrentQ] = useState(0);
-    const [score, setScore] = useState(0);
-    const [showScore, setShowScore] = useState(false);
-    const [selected, setSelected] = useState(null);
-    const [isCorrect, setIsCorrect] = useState(null);
+export default function Quiz({navigation}) {
+  const [currentQ, setCurrentQ] = useState(0);
+  const [score, setScore] = useState(0);
+  const [showScore, setShowScore] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [isCorrect, setIsCorrect] = useState(null);
 
-    const handleAnswer = (index) => {
-        setSelected(index);
-        const correct = index === QUESTIONS[currentQ].correct;
-        setIsCorrect(correct);
-        if (correct) setScore(score + 1);
+  const handleAnswer = index => {
+    setSelected(index);
+    const correct = index === QUESTIONS[currentQ].correct;
+    setIsCorrect(correct);
+    if (correct) setScore(score + 1);
 
-        setTimeout(() => {
-            if (currentQ < QUESTIONS.length - 1) {
-                setCurrentQ(currentQ + 1);
-                setSelected(null);
-                setIsCorrect(null);
-            } else {
-                setShowScore(true);
-            }
-        }, 1000);
-    };
-
-    const restart = () => {
-        setScore(0);
-        setCurrentQ(0);
-        setShowScore(false);
+    setTimeout(() => {
+      if (currentQ < QUESTIONS.length - 1) {
+        setCurrentQ(currentQ + 1);
         setSelected(null);
         setIsCorrect(null);
-    };
+      } else {
+        setShowScore(true);
+      }
+    }, 1000);
+  };
 
-    if (showScore) {
-        return (
-            <LinearGradient colors={['#FF6B6B', '#556270']} style={styles.container}>
-                <Animatable.View animation="zoomIn" style={styles.scoreCard}>
-                    <Text style={styles.scoreTitle}>Quiz Completed!</Text>
-                    <Text style={styles.scoreText}>Your Score: {score} / {QUESTIONS.length}</Text>
-                    <Pressable onPress={restart} style={styles.restartBtn}>
-                        <Text style={styles.btnText}>Restart Quiz</Text>
-                    </Pressable>
-                    <Pressable onPress={() => navigation.goBack()} style={[styles.restartBtn, {backgroundColor: 'transparent', borderWidth: 1, borderColor: '#333', marginTop: 10}]}>
-                        <Text style={[styles.btnText, {color: '#333'}]}>Back to Home</Text>
-                    </Pressable>
-                </Animatable.View>
-            </LinearGradient>
-        );
-    }
+  const restart = () => {
+    setScore(0);
+    setCurrentQ(0);
+    setShowScore(false);
+    setSelected(null);
+    setIsCorrect(null);
+  };
 
+  if (showScore) {
     return (
-        <View style={styles.container}>
-            <LinearGradient colors={['#FF6A3D', '#FF8E53']} style={styles.header}>
-                <Text style={styles.headerTitle}>Knowledge Quiz</Text>
-                <Text style={styles.progress}>Question {currentQ + 1} / {QUESTIONS.length}</Text>
-            </LinearGradient>
-
-            <View style={styles.card}>
-                <Text style={styles.question}>{QUESTIONS[currentQ].question}</Text>
-
-                <View style={styles.options}>
-                    {QUESTIONS[currentQ].options.map((opt, index) => {
-                        let bgColor = '#f0f0f0';
-                        if (selected === index) {
-                            bgColor = isCorrect ? '#4CAF50' : '#F44336';
-                        }
-
-                        return (
-                            <Pressable 
-                                key={index} 
-                                style={[styles.option, { backgroundColor: bgColor }]}
-                                onPress={() => !selected && handleAnswer(index)}
-                            >
-                                <Text style={[styles.optionText, selected === index && {color: '#fff'}]}>{opt}</Text>
-                            </Pressable>
-                        );
-                    })}
-                </View>
-            </View>
-        </View>
+      <LinearGradient colors={['#FF6B6B', '#556270']} style={styles.container}>
+        <Animatable.View animation="zoomIn" style={styles.scoreCard}>
+          <Text style={styles.scoreTitle}>Quiz Completed!</Text>
+          <Text style={styles.scoreText}>
+            Your Score: {score} / {QUESTIONS.length}
+          </Text>
+          <Pressable onPress={restart} style={styles.restartBtn}>
+            <Text style={styles.btnText}>Restart Quiz</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => navigation.goBack()}
+            style={[
+              styles.restartBtn,
+              {
+                backgroundColor: 'transparent',
+                borderWidth: 1,
+                borderColor: '#333',
+                marginTop: 10,
+              },
+            ]}>
+            <Text style={[styles.btnText, {color: '#333'}]}>Back to Home</Text>
+          </Pressable>
+        </Animatable.View>
+      </LinearGradient>
     );
+  }
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient colors={['#FF6A3D', '#FF8E53']} style={styles.header}>
+        <Text style={styles.headerTitle}>Knowledge Quiz</Text>
+        <Text style={styles.progress}>
+          Question {currentQ + 1} / {QUESTIONS.length}
+        </Text>
+      </LinearGradient>
+
+      <View style={styles.card}>
+        <Text style={styles.question}>{QUESTIONS[currentQ].question}</Text>
+
+        <View style={styles.options}>
+          {QUESTIONS[currentQ].options.map((opt, index) => {
+            let bgColor = '#f0f0f0';
+            if (selected === index) {
+              bgColor = isCorrect ? '#4CAF50' : '#F44336';
+            }
+
+            return (
+              <Pressable
+                key={index}
+                style={[styles.option, {backgroundColor: bgColor}]}
+                onPress={() => !selected && handleAnswer(index)}>
+                <Text
+                  style={[
+                    styles.optionText,
+                    selected === index && {color: '#fff'},
+                  ]}>
+                  {opt}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
