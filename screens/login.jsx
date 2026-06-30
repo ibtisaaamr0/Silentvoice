@@ -87,12 +87,7 @@ export default function Login({navigation}) {
           animation="fadeInUp"
           duration={800}
           style={styles.formCard}>
-          <Text style={[styles.heading, {color: colors.text}]}>
-            Welcome Back 👋
-          </Text>
-          <Text style={[styles.subtext, {color: colors.subtext}]}>
-            Log in to continue your journey
-          </Text>
+          
 
           <View style={styles.inputGroup}>
             <Text style={[styles.label, {color: colors.text}]}>Email</Text>
