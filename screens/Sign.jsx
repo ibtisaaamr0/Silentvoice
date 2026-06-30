@@ -24,7 +24,9 @@ export default function Sign() {
 
   const [hasPermission, setHasPermission] = useState(false);
   const [screenState, setScreenState] = useState(STATE_IDLE);
-  const [gesture, setGesture] = useState('');
+  
+  // Store both variants so toggling works instantly on the result screen
+  const [translations, setTranslations] = useState({ en: '', ur: '' });
   const [lang, setLang] = useState('en');
 
   useEffect(() => {
@@ -57,7 +59,6 @@ export default function Sign() {
   };
 
   const sendVideo = async videoPath => {
-    // 1. Create an AbortController to enforce a timeout guard
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000); // 45-second timeout limit
 
@@ -67,7 +68,6 @@ export default function Sign() {
       
       setScreenState(STATE_TRANSLATING);
 
-      // 2. Sanitize file path prefix for both Android and iOS
       const cleanUri = videoPath.startsWith("file://") ? videoPath : `file://${videoPath}`;
 
       const formData = new FormData();
@@ -84,16 +84,14 @@ export default function Sign() {
       const res = await fetch(BACKEND_URL, {
         method: "POST",
         body: formData,
-        signal: controller.signal, // Connect the abort signal here
+        signal: controller.signal,
         headers: {
           'Accept': 'application/json',
-          // CRITICAL: Do NOT manually set 'Content-Type': 'multipart/form-data' here!
-          // React Native needs to auto-generate it with the correct multi-part boundary.
         },
       });
 
-      clearTimeout(timeoutId); // Clear timeout if server responds in time
-      console.log("Response status received:", res.status);
+      clearTimeout(timeoutId);
+      print("Response status received:", res.status);
 
       if (!res.ok) {
         throw new Error(`Server returned status code ${res.status}`);
@@ -102,7 +100,12 @@ export default function Sign() {
       const json = await res.json();
       console.log("Parsed JSON successfully:", json);
 
-      setGesture(json.display || json.gesture || "No sign detected");
+      // Save both english and urdu outputs from the backend response
+      setTranslations({
+        en: json.en || json.display || json.gesture || "No sign detected",
+        ur: json.ur || "کوئی اشارہ نہیں ملا"
+      });
+      
       setScreenState(STATE_RESULT);
 
     } catch (err) {
@@ -111,21 +114,26 @@ export default function Sign() {
       console.log(err);
       
       if (err.name === 'AbortError') {
-        setGesture("⚠️ Request timed out. Server took too long.");
+        setTranslations({ en: "⚠️ Request timed out.", ur: "⚠️ وقت ختم ہو گیا۔" });
       } else {
-        setGesture("⚠️ Connection or processing error");
+        setTranslations({ en: "⚠️ Connection error.", ur: "⚠️ رابطہ منقطع ہو گیا۔" });
       }
       setScreenState(STATE_RESULT);
     }
   };
+
   const handleRecordAgain = () => {
-    setGesture('');
+    setTranslations({ en: '', ur: '' });
     setScreenState(STATE_IDLE);
   };
 
   const speakResult = () => {
+    // Select the current string to say based on language state selection
+    const currentText = lang === 'ur' ? translations.ur : translations.en;
+    if (!currentText) return;
+
     Tts.setDefaultLanguage(lang === 'ur' ? 'ur-PK' : 'en-US');
-    Tts.speak(gesture);
+    Tts.speak(currentText);
   };
 
   const toggleLang = () => setLang(p => (p === 'en' ? 'ur' : 'en'));
@@ -146,6 +154,9 @@ export default function Sign() {
     );
   }
 
+  // Get current active localized gesture text string
+  const activeGestureText = lang === 'ur' ? translations.ur : translations.en;
+
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <Camera
@@ -157,7 +168,7 @@ export default function Sign() {
         audio={false}
       />
 
-      {/* Language toggle */}
+      {/* Language toggle is always accessible except when uploading */}
       {screenState !== STATE_TRANSLATING && (
         <TouchableOpacity style={styles.langButton} onPress={toggleLang}>
           <Text style={styles.langButtonText}>
@@ -170,14 +181,16 @@ export default function Sign() {
       {screenState === STATE_IDLE && (
         <View style={styles.bottomPanel}>
           <Text style={styles.hint}>
-            Tap to record a word or sentence in sign language
+            {lang === 'en' ? 'Tap to record sign language' : 'اشارہ ریکارڈ کرنے کے لیے دبائیں'}
           </Text>
           <TouchableOpacity
             style={styles.recordButton}
             onPress={handleStartRecording}
             activeOpacity={0.8}>
             <View style={styles.recordDot} />
-            <Text style={styles.recordText}>Start Recording</Text>
+            <Text style={styles.recordText}>
+              {lang === 'en' ? 'Start Recording' : 'ریکارڈنگ شروع کریں'}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -187,14 +200,18 @@ export default function Sign() {
         <View style={styles.bottomPanel}>
           <View style={styles.recordingIndicator}>
             <View style={styles.recordingPulse} />
-            <Text style={styles.recordingLabel}>Recording...</Text>
+            <Text style={styles.recordingLabel}>
+              {lang === 'en' ? 'Recording...' : 'ریکارڈنگ جاری ہے...'}
+            </Text>
           </View>
           <TouchableOpacity
             style={styles.stopButton}
             onPress={handleStopRecording}
             activeOpacity={0.8}>
             <View style={styles.stopSquare} />
-            <Text style={styles.recordText}>Stop Recording</Text>
+            <Text style={styles.recordText}>
+              {lang === 'en' ? 'Stop Recording' : 'ریکارڈنگ روکیں'}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -203,7 +220,9 @@ export default function Sign() {
       {screenState === STATE_TRANSLATING && (
         <View style={styles.translatingOverlay}>
           <ActivityIndicator size="large" color="#ffffff" />
-          <Text style={styles.translatingText}>Translating sign...</Text>
+          <Text style={styles.translatingText}>
+            {lang === 'en' ? 'Translating sign...' : 'ترجمہ ہو رہا ہے...'}
+          </Text>
         </View>
       )}
 
@@ -211,23 +230,29 @@ export default function Sign() {
       {screenState === STATE_RESULT && (
         <View style={styles.bottomPanel}>
           <View style={styles.resultBox}>
-            <Text style={styles.resultLabel}>Translation:</Text>
+            <Text style={styles.resultLabel}>
+              {lang === 'en' ? 'Translation:' : 'ترجمہ:'}
+            </Text>
             <Text
               style={[
                 styles.resultText,
                 { writingDirection: lang === 'ur' ? 'rtl' : 'ltr' },
               ]}>
-              {gesture}
+              {activeGestureText}
             </Text>
             <TouchableOpacity style={styles.speakButton} onPress={speakResult}>
-              <Text style={styles.speakText}>🔊 Speak</Text>
+              <Text style={styles.speakText}>
+                {lang === 'en' ? '🔊 Speak' : '🔊 بولیں'}
+              </Text>
             </TouchableOpacity>
           </View>
           <TouchableOpacity
             style={styles.recordButton}
             onPress={handleRecordAgain}
             activeOpacity={0.8}>
-            <Text style={styles.recordText}>Record Again</Text>
+            <Text style={styles.recordText}>
+              {lang === 'en' ? 'Record Again' : 'دوبارہ ریکارڈ کریں'}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -258,7 +283,7 @@ const styles = StyleSheet.create({
 
   bottomPanel: {
     position: 'absolute',
-    bottom: 100, // increased to clear the tab bar
+    bottom: 100,
     left: 0,
     right: 0,
     alignItems: 'center',

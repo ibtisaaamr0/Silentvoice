@@ -25,6 +25,7 @@ def health():
     return jsonify({
         "status": "ok"
     })
+
 try:
     from gesture import GestureRecognizer
     from voice import speech_to_text, translate_text
@@ -55,51 +56,75 @@ def decode_image(data):
 @app.route("/gesture-video", methods=["POST"])
 def gesture_video():
     print("\n========== GESTURE REQUEST ==========")
-    print("ML_READY:", ML_READY)
-    print("Request files:", request.files)
-    print("Request form:", request.form)
+
+    # Check whether ML model loaded successfully
+    print("[INFO] ML_READY:", ML_READY)
 
     if not ML_READY:
-        print("ML modules unavailable")
+        print("[ERROR] ML modules unavailable")
         return jsonify({"error": "ML modules unavailable"})
 
-    if 'file' not in request.files:
-        print("No video file received!")
+    # Show everything received from the request
+    print("[INFO] Request files:", request.files)
+    print("[INFO] Request form:", request.form)
+
+    # Verify that a file actually exists
+    if "file" not in request.files:
+        print("[ERROR] No video file received!")
         return jsonify({"error": "No video file"})
 
-    file = request.files['file']
+    file = request.files["file"]
+    # Keeping lang parameter capture for backwards compatibility
     lang = request.form.get("lang", "en")
 
-    print("Filename:", file.filename)
-    print("Language:", lang)
+    print("[INFO] Received filename:", file.filename)
+    print("[INFO] Client Request Language:", lang)
 
+    # Save uploaded video
     video_path = "temp_video.mp4"
     file.save(video_path)
 
+    # Confirm the upload reached backend
     if os.path.exists(video_path):
-        print("Video saved successfully.")
-        print("Video size:", os.path.getsize(video_path), "bytes")
+        print("✅ VIDEO RECEIVED BY BACKEND")
+        print("[INFO] Saved as:", video_path)
+        print("[INFO] Size:", os.path.getsize(video_path), "bytes")
     else:
-        print("Video was NOT saved!")
+        print("❌ Video was NOT saved")
+        return jsonify({"error": "Video save failed"})
 
-    print("Running gesture detection...")
+    print("\n========== STARTING DETECTION ==========")
 
+    # Run ML model
     result = detector.detect_from_video(video_path)
 
-    print("Detection result:", result)
+    print("========== DETECTION FINISHED ==========")
+    print("Model returned raw prediction:", result)
 
-    display = translate_label(result, lang)
+    # CRITICAL FIX: Extract BOTH localized versions simultaneously
+    # This allows the React Native client to switch text and audio dynamically
+    display_en = translate_label(result, "en")
+    display_ur = translate_label(result, "ur")
 
+    print(f"Translated variants -> EN: {display_en} | UR: {display_ur}")
+
+    # Delete temporary file
     os.remove(video_path)
-
     print("Temporary video deleted.")
-    print("====================================\n")
 
-    return jsonify({
+    # Combined dual response payload sent back to React Native
+    response = {
         "gesture": result,
-        "display": display
-    })
+        "display": display_en,  # Legacy safety fallback mapping
+        "en": display_en,
+        "ur": display_ur
+    }
 
+    print("\n========== RESPONSE TO CLIENT ==========")
+    print(response)
+    print("========================================\n")
+
+    return jsonify(response)
 
 # =========================
 # VOICE ROUTE
@@ -137,17 +162,14 @@ def voice():
 # =========================
 @app.route("/video/<path:filepath>", methods=["GET"])
 def serve_video(filepath):
-    # Safely handle encoded spaces (%20) or characters passed down by your front-end components
     decoded_filepath = urllib.parse.unquote(filepath)
     
-    # Auto-append extension if the route payload skips it
     if not decoded_filepath.lower().endswith('.mp4'):
         decoded_filepath += '.mp4'
 
     video_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "videos")
     path = os.path.abspath(os.path.join(video_dir, decoded_filepath))
     
-    # Directory Traversal Guard (Make sure the target path stays inside the intended folder)
     if not path.startswith(os.path.abspath(video_dir)):
         return "Access Denied", 403
 

@@ -42,7 +42,7 @@ class GestureRecognizer:
             raw_features = []
             for point in lm:
                 raw_features.extend([point.x, point.y, point.z])
-            features = normalize_landmarks(raw_features).reshape(1, -1)  # 👈 NEW
+            features = normalize_landmarks(raw_features).reshape(1, -1)
             gesture = self.model.predict(features)[0]
         self.buffer.append(gesture)
         return max(set(self.buffer), key=self.buffer.count)
@@ -67,7 +67,7 @@ class GestureRecognizer:
                 raw_features = []
                 for point in lm:
                     raw_features.extend([point.x, point.y, point.z])
-                features = normalize_landmarks(raw_features).reshape(1, -1)  # 👈 NEW
+                features = normalize_landmarks(raw_features).reshape(1, -1)
 
                 probs = self.model.predict_proba(features)[0]
                 best_idx = np.argmax(probs)
