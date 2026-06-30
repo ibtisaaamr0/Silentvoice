@@ -14,7 +14,7 @@ import {WebView} from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useSelector} from 'react-redux';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import {API_URL} from '../config';
+import { API_URL } from "../src/config";
 
 const {width} = Dimensions.get('window');
 const BACKEND = `${API_URL}`;

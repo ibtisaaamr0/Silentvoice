@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import AudioRecord from "react-native-audio-record";
 import Tts from "react-native-tts";
-import { API_URL } from "../config";
+import { API_URL } from "../src/config";
 
 const BACKEND_URL = `${API_URL}/voice`;
 

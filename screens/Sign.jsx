@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import {Camera, useCameraDevice} from 'react-native-vision-camera';
 import Tts from 'react-native-tts';
-import {API_URL} from '../config';
+import { API_URL } from "../src/config";
 
 const BACKEND_URL = `${API_URL}/gesture-video`;
 
