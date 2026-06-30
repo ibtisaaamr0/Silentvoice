@@ -5,6 +5,9 @@ import cv2
 import base64
 import os
 import urllib.parse
+from model_downloader import ensure_model_downloaded
+
+ensure_model_downloaded()
 
 app = Flask(__name__)
 CORS(app)
@@ -150,4 +153,5 @@ def serve_video(filepath):
 # RUN SERVER
 # =========================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=False)
