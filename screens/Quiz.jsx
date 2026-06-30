@@ -14,9 +14,10 @@ import {WebView} from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {useSelector} from 'react-redux';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import {API_URL} from '../config';
 
 const {width} = Dimensions.get('window');
-const BACKEND = 'http://192.168.100.190:8080';
+const BACKEND = `${API_URL}`;
 const HISTORY_KEY = 'quiz_history';
 const OPTION_LETTERS = ['A', 'B', 'C', 'D'];
 

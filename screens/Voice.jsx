@@ -10,8 +10,9 @@ import {
 } from "react-native";
 import AudioRecord from "react-native-audio-record";
 import Tts from "react-native-tts";
+import { API_URL } from "../config";
 
-const BACKEND_URL = "http://192.168.100.190:8080/voice";
+const BACKEND_URL = `${API_URL}/voice`;
 
 const STATE_IDLE = "idle";
 const STATE_RECORDING = "recording";

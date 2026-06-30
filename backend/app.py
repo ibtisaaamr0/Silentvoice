@@ -12,6 +12,19 @@ ensure_model_downloaded()
 app = Flask(__name__)
 CORS(app)
 
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "Backend running",
+        "service": "Silent Voice API"
+    })
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ok"
+    })
 try:
     from gesture import GestureRecognizer
     from voice import speech_to_text, translate_text

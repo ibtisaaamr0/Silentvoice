@@ -8,8 +8,9 @@ import {
 } from 'react-native';
 import {Camera, useCameraDevice} from 'react-native-vision-camera';
 import Tts from 'react-native-tts';
+import {API_URL} from '../config';
 
-const BACKEND_URL = 'http://192.168.100.190:8080/gesture-video';
+const BACKEND_URL = `${API_URL}/gesture-video`;
 
 // Screen states
 const STATE_IDLE = 'idle';
