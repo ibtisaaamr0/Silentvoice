@@ -51,22 +51,21 @@ def decode_image(data):
 
 # =========================
 # GESTURE VIDEO ROUTE
-# =========================
-@app.route("/gesture-video", methods=["POST"])
+# =========================@app.route("/gesture-video", methods=["POST"])
 def gesture_video():
-    print("\n========== GESTURE REQUEST ==========")
-    print("ML_READY:", ML_READY)
-    print("Request files:", request.files)
-    print("Request form:", request.form)
+
+    print("\n========== NEW REQUEST ==========")
+    print("Content-Type:", request.content_type)
+    print("Files:", list(request.files.keys()))
+    print("Form:", request.form.to_dict())
 
     if not ML_READY:
-        print("ML modules unavailable")
-        return jsonify({"error": "ML modules unavailable"})
+        return jsonify({"error": "ML not loaded"}), 500
 
-    if 'file' not in request.files:
-        print("No video file received!")
-        return jsonify({"error": "No video file"})
-
+    if "file" not in request.files:
+        print("NO FILE RECEIVED")
+        return jsonify({"error": "No video file"}), 400
+        
     file = request.files['file']
     lang = request.form.get("lang", "en")
 
