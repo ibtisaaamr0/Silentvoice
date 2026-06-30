@@ -102,7 +102,7 @@ function HomeScreen({ navigation }) {
         </Text>
 
         <View style={styles.footer}>
-          <SwipeSlider onSwipeComplete={() => navigation.navigate("Tabs")} />
+          <SwipeSlider onSwipeComplete={() => navigation.navigate("Login")} />
         </View>
       </View>
     </ImageBackground>
