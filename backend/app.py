@@ -54,21 +54,46 @@ def decode_image(data):
 # =========================
 @app.route("/gesture-video", methods=["POST"])
 def gesture_video():
+    print("\n========== GESTURE REQUEST ==========")
+    print("ML_READY:", ML_READY)
+    print("Request files:", request.files)
+    print("Request form:", request.form)
+
     if not ML_READY:
+        print("ML modules unavailable")
         return jsonify({"error": "ML modules unavailable"})
+
     if 'file' not in request.files:
+        print("No video file received!")
         return jsonify({"error": "No video file"})
 
     file = request.files['file']
     lang = request.form.get("lang", "en")
 
+    print("Filename:", file.filename)
+    print("Language:", lang)
+
     video_path = "temp_video.mp4"
     file.save(video_path)
 
+    if os.path.exists(video_path):
+        print("Video saved successfully.")
+        print("Video size:", os.path.getsize(video_path), "bytes")
+    else:
+        print("Video was NOT saved!")
+
+    print("Running gesture detection...")
+
     result = detector.detect_from_video(video_path)
+
+    print("Detection result:", result)
+
     display = translate_label(result, lang)
 
     os.remove(video_path)
+
+    print("Temporary video deleted.")
+    print("====================================\n")
 
     return jsonify({
         "gesture": result,
