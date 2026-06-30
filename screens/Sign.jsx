@@ -1,4 +1,4 @@
-import React, {useState, useRef, useEffect} from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import {Camera, useCameraDevice} from 'react-native-vision-camera';
+import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import Tts from 'react-native-tts';
 import { API_URL } from "../src/config";
 
@@ -57,31 +57,67 @@ export default function Sign() {
   };
 
   const sendVideo = async videoPath => {
+    // 1. Create an AbortController to enforce a timeout guard
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000); // 45-second timeout limit
+
     try {
+      console.log("========== UPLOADING ==========");
+      console.log("Original Video path:", videoPath);
+      
+      setScreenState(STATE_TRANSLATING);
+
+      // 2. Sanitize file path prefix for both Android and iOS
+      const cleanUri = videoPath.startsWith("file://") ? videoPath : `file://${videoPath}`;
+
       const formData = new FormData();
-      formData.append('file', {
-        uri: 'file://' + videoPath,
-        type: 'video/mp4',
-        name: 'sign.mp4',
+      formData.append("file", {
+        uri: cleanUri,
+        type: "video/mp4",
+        name: "sign.mp4",
       });
-      formData.append('lang', lang);
+
+      formData.append("lang", lang);
+
+      console.log("Sending request to:", BACKEND_URL);
 
       const res = await fetch(BACKEND_URL, {
-        method: 'POST',
+        method: "POST",
         body: formData,
-        headers: {'Content-Type': 'multipart/form-data'},
+        signal: controller.signal, // Connect the abort signal here
+        headers: {
+          'Accept': 'application/json',
+          // CRITICAL: Do NOT manually set 'Content-Type': 'multipart/form-data' here!
+          // React Native needs to auto-generate it with the correct multi-part boundary.
+        },
       });
 
+      clearTimeout(timeoutId); // Clear timeout if server responds in time
+      console.log("Response status received:", res.status);
+
+      if (!res.ok) {
+        throw new Error(`Server returned status code ${res.status}`);
+      }
+
       const json = await res.json();
-      setGesture(json.display || json.gesture || 'No sign detected');
+      console.log("Parsed JSON successfully:", json);
+
+      setGesture(json.display || json.gesture || "No sign detected");
       setScreenState(STATE_RESULT);
+
     } catch (err) {
-      console.log('Upload error:', err.message);
-      setGesture('⚠️ Connection error, try again');
+      clearTimeout(timeoutId);
+      console.log("========== UPLOADING ERROR ==========");
+      console.log(err);
+      
+      if (err.name === 'AbortError') {
+        setGesture("⚠️ Request timed out. Server took too long.");
+      } else {
+        setGesture("⚠️ Connection or processing error");
+      }
       setScreenState(STATE_RESULT);
     }
   };
-
   const handleRecordAgain = () => {
     setGesture('');
     setScreenState(STATE_IDLE);
@@ -111,7 +147,7 @@ export default function Sign() {
   }
 
   return (
-    <View style={{flex: 1, backgroundColor: '#000'}}>
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
       <Camera
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -179,7 +215,7 @@ export default function Sign() {
             <Text
               style={[
                 styles.resultText,
-                {writingDirection: lang === 'ur' ? 'rtl' : 'ltr'},
+                { writingDirection: lang === 'ur' ? 'rtl' : 'ltr' },
               ]}>
               {gesture}
             </Text>
@@ -206,7 +242,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#000',
   },
-  text: {color: 'white', fontSize: 18},
+  text: { color: 'white', fontSize: 18 },
 
   langButton: {
     position: 'absolute',
@@ -218,7 +254,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     zIndex: 10,
   },
-  langButtonText: {fontWeight: 'bold', color: '#222'},
+  langButtonText: { fontWeight: 'bold', color: '#222' },
 
   bottomPanel: {
     position: 'absolute',
@@ -257,7 +293,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     marginRight: 10,
   },
-  recordText: {color: 'white', fontWeight: 'bold', fontSize: 16},
+  recordText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
   stopButton: {
     flexDirection: 'row',
@@ -293,7 +329,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#e53935',
     marginRight: 8,
   },
-  recordingLabel: {color: 'white', fontSize: 15, fontWeight: '600'},
+  recordingLabel: { color: 'white', fontSize: 15, fontWeight: '600' },
 
   translatingOverlay: {
     position: 'absolute',
@@ -321,7 +357,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
   },
-  resultLabel: {color: '#aaa', fontSize: 13, marginBottom: 8},
+  resultLabel: { color: '#aaa', fontSize: 13, marginBottom: 8 },
   resultText: {
     color: 'white',
     fontSize: 26,
@@ -336,5 +372,5 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 10,
   },
-  speakText: {color: 'white', fontWeight: 'bold'},
+  speakText: { color: 'white', fontWeight: 'bold' },
 });
