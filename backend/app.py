@@ -51,7 +51,8 @@ def decode_image(data):
 
 # =========================
 # GESTURE VIDEO ROUTE
-# =========================@app.route("/gesture-video", methods=["POST"])
+# =========================
+@app.route("/gesture-video", methods=["POST"])
 def gesture_video():
 
     print("\n========== NEW REQUEST ==========")
@@ -65,7 +66,7 @@ def gesture_video():
     if "file" not in request.files:
         print("NO FILE RECEIVED")
         return jsonify({"error": "No video file"}), 400
-        
+
     file = request.files['file']
     lang = request.form.get("lang", "en")
 
