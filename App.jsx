@@ -39,6 +39,7 @@ import ForgotPassword from "./screens/ForgotPass";
 import Voice from "./screens/Voice";
 import TextToVoice from "./screens/text_to_voice";
 import LockScreen from "./screens/LockScreen";
+import AvatarSelection from "./screens/AvatarSelection";
 
 import { loadSettings } from "./utils/settingsStorage";
 import { configurePushNotifications, scheduleDailyReminder } from "./utils/notifications";
@@ -157,6 +158,7 @@ export default function App() {
             <Stack.Screen name="Help_and_Support" component={HelpSupport} />
             <Stack.Screen name="Voice" component={Voice} />
             <Stack.Screen name="TextToVoice" component={TextToVoice} />
+            <Stack.Screen name="AvatarSelection" component={AvatarSelection} />
           </Stack.Navigator>
         </NavigationContainer>
       </Provider>
@@ -235,4 +237,4 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     textTransform: "uppercase"
   },
-});
+}); 

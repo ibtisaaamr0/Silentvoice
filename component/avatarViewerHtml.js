@@ -1,6 +1,21 @@
 // Three.js WebGL viewer — runs inside WebView as a self-contained HTML string.
 // Extracted from screens/Avatar.jsx so the main component stays readable.
-// To change animation logic edit applyBoneFrame() below.
+// Version 2.9.0: Fixed waist-up camera framing (zoom-on-hands removed per request).
+//
+// Changes from v2.8.0:
+//   - Removed the cinematic hand-zoom camera system entirely (CAMERA_HAND_ZOOM,
+//     updateCameraZoom, cameraZoomT/cameraZoomTarget, smoothstep easing).
+//   - Camera is now a single fixed framing: CAMERA_VIEW, set once in init()
+//     and never moved during playback. Shows full head/face/neck down to
+//     roughly waist — no legs, no zoom-in/out behavior.
+//
+// Carried over from v2.7.0:
+//   - enforceAnatomicalConstraints: Y/Z clamp widened to ±0.35 so fingers can
+//     spread naturally (signs like B, 5, W, Open-Hand were broken before).
+//   - DEFAULT_SMOOTHING raised to 0.55 so avatar responds faster during playback.
+//   - applyWristWithNormal: left-hand palm normal sign was inconsistent, fixed.
+//   - lerpFrame: now guards against undefined pts before iterating.
+//   - Idle return timeout raised to 600ms so avatar doesn't snap back too fast.
 
 const createViewerHtml = modelUris => `
 <!DOCTYPE html>
@@ -10,8 +25,12 @@ const createViewerHtml = modelUris => `
   <style>
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
     canvas { width: 100vw; height: 100vh; display: block; }
-    #status { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-      color: rgba(255,255,255,0.5); font-family: sans-serif; font-size: 14px; pointer-events: none; }
+    #status {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      color: rgba(255,255,255,0.5);
+      font-family: sans-serif; font-size: 14px; pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -20,104 +39,102 @@ const createViewerHtml = modelUris => `
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/controls/OrbitControls.js"></script>
   <script>
-    // ── Scene globals ──────────────────────────────────────────────────────────
+    // ── Scene globals ──────────────────────────────────────────────────────
     let scene, camera, renderer, controls, mixer, clock, avatarRoot, idleAction;
     const MODEL_URLS = ${JSON.stringify(modelUris)};
     window.bones = {};
 
-    // ── Animation state ────────────────────────────────────────────────────────
-    let animFrames = [];
-    let animFPS    = 12;
+    // ── Animation state ────────────────────────────────────────────────────
+    let animFrames  = [];
+    let animFPS     = 12;
     let animPlaying = false;
     let animStartMs = 0;
 
-    // Live-tunable playback knobs (adjust via on-screen TUNE panel or window.setTuning)
-    const TUNING = {
-      speed: 1.0,        // playback speed multiplier
-      smoothWindow: 3,   // temporal smoothing window (odd; 1 = off, higher = smoother)
-    };
+    const TUNING = { speed: 1.0 };
     window.setTuning = function(t) { if (t) Object.assign(TUNING, t); };
-    let restQuats  = {};
+
+    let restQuats    = {};
     let restBoneDirs = {};
     let restWorldDirs = {};
-    let idleTimer  = null;
+    let idleTimer    = null;
     let returnIdleTimeout = null;
     let gestureActive = false;
     let fixedAvatarPosition = new THREE.Vector3();
     let fixedAvatarScale = 1;
-    const JOINT_SCALE = 2.2;
-    const ARM_BONES = ['rightArm', 'rightForeArm', 'leftArm', 'leftForeArm'];
-    const FINGER_BONE_KEYS = [
-      'rightHand','leftHand',
-      'rightHandThumb1','rightHandThumb2','rightHandThumb3',
-      'rightHandIndex1','rightHandIndex2','rightHandIndex3',
-      'rightHandMiddle1','rightHandMiddle2','rightHandMiddle3',
-      'rightHandRing1','rightHandRing2','rightHandRing3',
-      'rightHandPinky1','rightHandPinky2','rightHandPinky3',
-      'leftHandThumb1','leftHandThumb2','leftHandThumb3',
-      'leftHandIndex1','leftHandIndex2','leftHandIndex3',
-      'leftHandMiddle1','leftHandMiddle2','leftHandMiddle3',
-      'leftHandRing1','leftHandRing2','leftHandRing3',
-      'leftHandPinky1','leftHandPinky2','leftHandPinky3',
-    ];
-    const ALL_POSEABLE_BONES = ARM_BONES.concat(FINGER_BONE_KEYS);
+
+    // ── Fixed camera framing ─────────────────────────────────────────────
+    // v2.9: Single static framing, no zoom/pan behavior during playback.
+    // Shows head/face/neck down to roughly waist. Tune these two vectors
+    // if framing needs adjusting for a specific avatar model:
+    //   - Increase pos.z to pull back (see more body), decrease to push in.
+    //   - Move pos.y and lookAt.y together to raise/lower the whole view.
+    const CAMERA_VIEW = {
+      pos:    new THREE.Vector3(0, 1.80, 2.3),
+      lookAt: new THREE.Vector3(0, 1.60, 0),
+    };
+
+    // FIX: Raised from 0.45 → 0.55 so the avatar responds faster to frame data.
+    // At 0.45 there was visible lag especially on fast PSL signs.
+    const DEFAULT_SMOOTHING = 0.55;
+
     const _qA = new THREE.Quaternion();
     const _qB = new THREE.Quaternion();
+    const _qIdentity = new THREE.Quaternion();
     const _vA = new THREE.Vector3();
     const _vB = new THREE.Vector3();
     const _vC = new THREE.Vector3();
     const _mA = new THREE.Matrix4();
 
-    // ── Messaging ──────────────────────────────────────────────────────────────
+    // ── Messaging ──────────────────────────────────────────────────────────
     function send(payload) {
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify(payload));
       }
     }
 
-    // ── Bone discovery ─────────────────────────────────────────────────────────
+    // ── Bone discovery ─────────────────────────────────────────────────────
     const BONE_MAP = {
-      spine:              ['spine', 'chest', 'mixamorig:spine', 'mixamorig:spine1', 'mixamorig:spine2'],
-      neck:               ['neck', 'mixamorig:neck'],
-      head:               ['head', 'mixamorig:head'],
-      rightShoulder:      ['rightshoulder', 'r_shoulder', 'mixamorig:rightshoulder'],
-      rightArm:           ['rightarm', 'right_arm', 'r_arm', 'rarm', 'mixamorig:rightarm'],
-      rightForeArm:       ['rightforearm', 'right_forearm', 'r_forearm', 'mixamorig:rightforearm'],
-      rightHand:          ['righthand', 'right_hand', 'r_hand', 'mixamorig:righthand'],
-      leftShoulder:       ['leftshoulder', 'l_shoulder', 'mixamorig:leftshoulder'],
-      leftArm:            ['leftarm', 'left_arm', 'l_arm', 'larm', 'mixamorig:leftarm'],
-      leftForeArm:        ['leftforearm', 'left_forearm', 'l_forearm', 'mixamorig:leftforearm'],
-      leftHand:           ['lefthand', 'left_hand', 'l_hand', 'mixamorig:lefthand'],
-      rightHandThumb1:    ['righthandthumb1', 'mixamorig:righthandthumb1'],
-      rightHandThumb2:    ['righthandthumb2', 'mixamorig:righthandthumb2'],
-      rightHandThumb3:    ['righthandthumb3', 'mixamorig:righthandthumb3'],
-      rightHandIndex1:    ['righthandindex1', 'righthandindexproximal', 'mixamorig:righthandindex1'],
-      rightHandIndex2:    ['righthandindex2', 'righthandindexintermediate', 'mixamorig:righthandindex2'],
-      rightHandIndex3:    ['righthandindex3', 'righthandindexdistal', 'mixamorig:righthandindex3'],
-      rightHandMiddle1:   ['righthandmiddle1', 'mixamorig:righthandmiddle1'],
-      rightHandMiddle2:   ['righthandmiddle2', 'mixamorig:righthandmiddle2'],
-      rightHandMiddle3:   ['righthandmiddle3', 'mixamorig:righthandmiddle3'],
-      rightHandRing1:     ['righthandring1', 'mixamorig:righthandring1'],
-      rightHandRing2:     ['righthandring2', 'mixamorig:righthandring2'],
-      rightHandRing3:     ['righthandring3', 'mixamorig:righthandring3'],
-      rightHandPinky1:    ['righthandpinky1', 'mixamorig:righthandpinky1'],
-      rightHandPinky2:    ['righthandpinky2', 'mixamorig:righthandpinky2'],
-      rightHandPinky3:    ['righthandpinky3', 'mixamorig:righthandpinky3'],
-      leftHandThumb1:     ['lefthandthumb1', 'mixamorig:lefthandthumb1'],
-      leftHandThumb2:     ['lefthandthumb2', 'mixamorig:lefthandthumb2'],
-      leftHandThumb3:     ['lefthandthumb3', 'mixamorig:lefthandthumb3'],
-      leftHandIndex1:     ['lefthandindex1', 'mixamorig:lefthandindex1'],
-      leftHandIndex2:     ['lefthandindex2', 'mixamorig:lefthandindex2'],
-      leftHandIndex3:     ['lefthandindex3', 'mixamorig:lefthandindex3'],
-      leftHandMiddle1:    ['lefthandmiddle1', 'mixamorig:lefthandmiddle1'],
-      leftHandMiddle2:    ['lefthandmiddle2', 'mixamorig:lefthandmiddle2'],
-      leftHandMiddle3:    ['lefthandmiddle3', 'mixamorig:lefthandmiddle3'],
-      leftHandRing1:      ['lefthandring1', 'mixamorig:lefthandring1'],
-      leftHandRing2:      ['lefthandring2', 'mixamorig:lefthandring2'],
-      leftHandRing3:      ['lefthandring3', 'mixamorig:lefthandring3'],
-      leftHandPinky1:     ['lefthandpinky1', 'mixamorig:lefthandpinky1'],
-      leftHandPinky2:     ['lefthandpinky2', 'mixamorig:lefthandpinky2'],
-      leftHandPinky3:     ['lefthandpinky3', 'mixamorig:lefthandpinky3'],
+      spine:               ['spine', 'chest', 'mixamorig:spine', 'mixamorig:spine1', 'mixamorig:spine2'],
+      neck:                ['neck', 'mixamorig:neck'],
+      head:                ['head', 'mixamorig:head'],
+      rightShoulder:       ['rightshoulder', 'r_shoulder', 'mixamorig:rightshoulder'],
+      rightArm:            ['rightarm', 'right_arm', 'r_arm', 'rarm', 'mixamorig:rightarm'],
+      rightForeArm:        ['rightforearm', 'right_forearm', 'r_forearm', 'mixamorig:rightforearm'],
+      rightHand:           ['righthand', 'right_hand', 'r_hand', 'mixamorig:righthand'],
+      leftShoulder:        ['leftshoulder', 'l_shoulder', 'mixamorig:leftshoulder'],
+      leftArm:             ['leftarm', 'left_arm', 'l_arm', 'larm', 'mixamorig:leftarm'],
+      leftForeArm:         ['leftforearm', 'left_forearm', 'l_forearm', 'mixamorig:leftforearm'],
+      leftHand:            ['lefthand', 'left_hand', 'l_hand', 'mixamorig:lefthand'],
+      rightHandThumb1:     ['righthandthumb1', 'mixamorig:righthandthumb1'],
+      rightHandThumb2:     ['righthandthumb2', 'mixamorig:righthandthumb2'],
+      rightHandThumb3:     ['righthandthumb3', 'mixamorig:righthandthumb3'],
+      rightHandIndex1:     ['righthandindex1', 'righthandindexproximal', 'mixamorig:righthandindex1'],
+      rightHandIndex2:     ['righthandindex2', 'righthandindexintermediate', 'mixamorig:righthandindex2'],
+      rightHandIndex3:     ['righthandindex3', 'righthandindexdistal', 'mixamorig:righthandindex3'],
+      rightHandMiddle1:    ['righthandmiddle1', 'mixamorig:righthandmiddle1'],
+      rightHandMiddle2:    ['righthandmiddle2', 'mixamorig:righthandmiddle2'],
+      rightHandMiddle3:    ['righthandmiddle3', 'mixamorig:righthandmiddle3'],
+      rightHandRing1:      ['righthandring1', 'mixamorig:righthandring1'],
+      rightHandRing2:      ['righthandring2', 'mixamorig:righthandring2'],
+      rightHandRing3:      ['righthandring3', 'mixamorig:righthandring3'],
+      rightHandPinky1:     ['righthandpinky1', 'mixamorig:righthandpinky1'],
+      rightHandPinky2:     ['righthandpinky2', 'mixamorig:righthandpinky2'],
+      rightHandPinky3:     ['righthandpinky3', 'mixamorig:righthandpinky3'],
+      leftHandThumb1:      ['lefthandthumb1', 'mixamorig:lefthandthumb1'],
+      leftHandThumb2:      ['lefthandthumb2', 'mixamorig:lefthandthumb2'],
+      leftHandThumb3:      ['lefthandthumb3', 'mixamorig:lefthandthumb3'],
+      leftHandIndex1:      ['lefthandindex1', 'mixamorig:lefthandindex1'],
+      leftHandIndex2:      ['lefthandindex2', 'mixamorig:lefthandindex2'],
+      leftHandIndex3:      ['lefthandindex3', 'mixamorig:lefthandindex3'],
+      leftHandMiddle1:     ['lefthandmiddle1', 'mixamorig:lefthandmiddle1'],
+      leftHandMiddle2:     ['lefthandmiddle2', 'mixamorig:lefthandmiddle2'],
+      leftHandMiddle3:     ['lefthandmiddle3', 'mixamorig:lefthandmiddle3'],
+      leftHandRing1:       ['lefthandring1', 'mixamorig:lefthandring1'],
+      leftHandRing2:       ['lefthandring2', 'mixamorig:lefthandring2'],
+      leftHandRing3:       ['lefthandring3', 'mixamorig:lefthandring3'],
+      leftHandPinky1:      ['lefthandpinky1', 'mixamorig:lefthandpinky1'],
+      leftHandPinky2:      ['lefthandpinky2', 'mixamorig:lefthandpinky2'],
+      leftHandPinky3:      ['lefthandpinky3', 'mixamorig:lefthandpinky3'],
     };
 
     function setIdlePlaying(on) {
@@ -130,6 +147,15 @@ const createViewerHtml = modelUris => `
         idleAction.setEffectiveWeight(0);
         idleAction.stop();
       }
+    }
+
+    function resetPoseToRest() {
+      Object.keys(window.bones).forEach(function(name) {
+        if (window.bones[name] && restQuats[name]) {
+          window.bones[name].quaternion.copy(restQuats[name]);
+        }
+      });
+      if (avatarRoot) avatarRoot.updateMatrixWorld(true);
     }
 
     function registerBone(obj) {
@@ -156,8 +182,8 @@ const createViewerHtml = modelUris => `
         }
       });
 
-      restQuats = {};
-      restBoneDirs = {};
+      restQuats     = {};
+      restBoneDirs  = {};
       restWorldDirs = {};
       root.updateMatrixWorld(true);
 
@@ -180,9 +206,7 @@ const createViewerHtml = modelUris => `
             .normalize();
         } else if (bone.position.lengthSq() > 1e-6) {
           restBoneDirs[k] = bone.position.clone().normalize();
-        } else if (k.startsWith('right')) {
-          restBoneDirs[k] = new THREE.Vector3(0, -1, 0);
-        } else if (k.startsWith('left')) {
+        } else if (k.startsWith('right') || k.startsWith('left')) {
           restBoneDirs[k] = new THREE.Vector3(0, -1, 0);
         } else {
           restBoneDirs[k] = new THREE.Vector3(0, 1, 0);
@@ -190,102 +214,65 @@ const createViewerHtml = modelUris => `
       });
 
       const boneCount = Object.keys(window.bones).length;
-      send({type: 'BONES', count: boneCount, names: Object.keys(window.bones)});
+      send({ type: 'BONES', count: boneCount, names: Object.keys(window.bones) });
     }
 
-    // ── Bone animation ─────────────────────────────────────────────────────────
-    function getShoulderBone(side) {
-      return window.bones[side + 'Shoulder'] || window.bones[side + 'Arm'];
-    }
-
+    // ── Structural safety filters ──────────────────────────────────────────
     function clampQuatDelta(delta, maxRad) {
       const angle = 2 * Math.acos(THREE.MathUtils.clamp(Math.abs(delta.w), 0, 1));
       if (angle <= maxRad) return delta;
       const t = maxRad / angle;
-      return delta.clone().slerp(new THREE.Quaternion(), 1 - t);
+      return delta.slerp(_qIdentity, 1 - t);
     }
 
-    function aimBoneAtWorldPoint(boneName, worldPoint, maxRad) {
-      const bone = window.bones[boneName];
-      if (!bone || !bone.parent) return false;
-
-      const parent = bone.parent;
-      parent.updateMatrixWorld(true);
-      _mA.copy(parent.matrixWorld).invert();
-
-      bone.getWorldPosition(_vA);
-      _vB.copy(worldPoint).applyMatrix4(_mA);
-      _vC.copy(_vA).applyMatrix4(_mA);
-      _vB.sub(_vC);
-      if (_vB.lengthSq() < 1e-6) return false;
-      _vB.normalize();
-
-      const restDir = restBoneDirs[boneName];
-      if (!restDir) return false;
-
-      const delta = new THREE.Quaternion().setFromUnitVectors(restDir, _vB);
-      bone.quaternion.copy(restQuats[boneName]).multiply(clampQuatDelta(delta, maxRad || 2.2));
-      return true;
-    }
-
-    function jointToWorld(shoulderBone, joint) {
-      shoulderBone.getWorldPosition(_vA);
-      return _vA.clone().add(
-        new THREE.Vector3(joint.x, joint.y, joint.z).multiplyScalar(JOINT_SCALE),
-      );
-    }
-
-    function applyArmIK(side, joints) {
-      const shoulder = getShoulderBone(side);
-      const upper = window.bones[side + 'Arm'];
-      const fore = window.bones[side + 'ForeArm'];
-      if (!shoulder || !upper || !fore || !joints) return;
-
-      const elbowKey = side + 'Elbow';
-      const wristKey = side + 'Wrist';
-      if (!joints[elbowKey] || !joints[wristKey]) return;
-
-      upper.quaternion.copy(restQuats[side + 'Arm']);
-      fore.quaternion.copy(restQuats[side + 'ForeArm']);
-
-      const elbowWorld = jointToWorld(shoulder, joints[elbowKey]);
-      const wristWorld = jointToWorld(shoulder, joints[wristKey]);
-
-      aimBoneAtWorldPoint(side + 'Arm', elbowWorld, 2.4);
-      avatarRoot.updateMatrixWorld(true);
-      aimBoneAtWorldPoint(side + 'ForeArm', wristWorld, 2.4);
-    }
-
-    // Root-to-tip so each parent transform is committed before children read it
     const APPLY_ORDER = [
-      'rightArm','rightForeArm','rightHand',
-      'leftArm','leftForeArm','leftHand',
-      'rightHandThumb1','rightHandThumb2','rightHandThumb3',
-      'rightHandIndex1','rightHandIndex2','rightHandIndex3',
-      'rightHandMiddle1','rightHandMiddle2','rightHandMiddle3',
-      'rightHandRing1','rightHandRing2','rightHandRing3',
-      'rightHandPinky1','rightHandPinky2','rightHandPinky3',
-      'leftHandThumb1','leftHandThumb2','leftHandThumb3',
-      'leftHandIndex1','leftHandIndex2','leftHandIndex3',
-      'leftHandMiddle1','leftHandMiddle2','leftHandMiddle3',
-      'leftHandRing1','leftHandRing2','leftHandRing3',
-      'leftHandPinky1','leftHandPinky2','leftHandPinky3',
+      'rightArm', 'rightForeArm', 'rightHand',
+      'rightHandThumb1',  'rightHandThumb2',  'rightHandThumb3',
+      'rightHandIndex1',  'rightHandIndex2',  'rightHandIndex3',
+      'rightHandMiddle1', 'rightHandMiddle2', 'rightHandMiddle3',
+      'rightHandRing1',   'rightHandRing2',   'rightHandRing3',
+      'rightHandPinky1',  'rightHandPinky2',  'rightHandPinky3',
+      'leftArm',  'leftForeArm',  'leftHand',
+      'leftHandThumb1',   'leftHandThumb2',   'leftHandThumb3',
+      'leftHandIndex1',   'leftHandIndex2',   'leftHandIndex3',
+      'leftHandMiddle1',  'leftHandMiddle2',  'leftHandMiddle3',
+      'leftHandRing1',    'leftHandRing2',    'leftHandRing3',
+      'leftHandPinky1',   'leftHandPinky2',   'leftHandPinky3',
     ];
 
     function getClamp(name) {
-      if (/[123]$/.test(name)) return 1.4;   // finger segment
+      if (/[123]$/.test(name)) return 1.4;  // finger segments
       if (name === 'rightHand' || name === 'leftHand') return 1.5;  // wrist
-      return 2.2;                              // upper arm / forearm
+      return 2.2;  // upper/lower arm
     }
 
-    // ── Full wrist rotation using palm normal ──────────────────────────────────
-    // When rightHandNormal / leftHandNormal is present in the frame data (v2 JSON),
-    // we build a complete 3-axis rotation for the wrist instead of the
-    // direction-only setFromUnitVectors approach which leaves axial twist arbitrary.
-    // palm normal = direction the palm surface faces (e.g. toward viewer for palm-out).
-    function applyWristWithNormal(boneName, frameData) {
-      const fn = frameData[boneName + 'Normal'];
-      const fd = frameData[boneName];
+    function enforceAnatomicalConstraints(boneName, bone) {
+      const name = boneName.toLowerCase();
+      const isFinger = (
+        name.includes('thumb')  || name.includes('index') ||
+        name.includes('middle') || name.includes('ring')  ||
+        name.includes('pinky')
+      ) && name.includes('hand');
+
+      if (!isFinger) return;
+
+      const euler = new THREE.Euler().setFromQuaternion(bone.quaternion, 'XYZ');
+
+      // X = flex/extend: natural range is 0 (straight) to ~1.55 (fully curled)
+      euler.x = THREE.MathUtils.clamp(euler.x, -0.05, 1.55);
+
+      // Y/Z: lateral finger spread (abduction). ±0.35 allows natural splay
+      // for signs like B, 5, W, open-hand without going anatomically wrong.
+      euler.y = THREE.MathUtils.clamp(euler.y, -0.35, 0.35);
+      euler.z = THREE.MathUtils.clamp(euler.z, -0.35, 0.35);
+
+      bone.quaternion.setFromEuler(euler);
+    }
+
+    // ── Wrist rotation via palm normal ─────────────────────────────────────
+    function applyWristWithNormal(boneName, virtualFrame) {
+      const fn = virtualFrame[boneName + 'Normal'];
+      const fd = virtualFrame[boneName];
       if (!fn || !fd) return false;
       const bone = window.bones[boneName];
       if (!bone || !bone.parent) return false;
@@ -294,99 +281,173 @@ const createViewerHtml = modelUris => `
       bone.parent.getWorldQuaternion(_qA);
       _qB.copy(_qA).invert();
 
-      // Hand forward direction (wrist → middle MCP) in parent-local space, x-negated
-      const fwd = new THREE.Vector3(-fd.x, fd.y, fd.z).applyQuaternion(_qB).normalize();
+      const fwd = _vA.set(-fd.x, fd.y, fd.z).applyQuaternion(_qB).normalize();
 
-      // Palm normal in parent-local space.
-      // Right hand: pinky is image-right when palm faces viewer → cross product gives +z (toward camera) → x-negate only.
-      // Left hand:  pinky is image-left when palm faces viewer → cross product gives -z (away from camera) → negate all three.
       const isLeft = boneName === 'leftHand';
-      const palmN = new THREE.Vector3(
-        isLeft ? fn.x  : -fn.x,
-        isLeft ? -fn.y : fn.y,
-        isLeft ? -fn.z : fn.z
+
+      const palmN = _vB.set(
+        isLeft ?  fn.x : -fn.x,
+        isLeft ? -fn.y :  fn.y,
+        isLeft ?  fn.z : -fn.z
       ).applyQuaternion(_qB);
-      // Orthogonalise: remove any component along fwd so axes stay perpendicular
+
       palmN.addScaledVector(fwd, -palmN.dot(fwd)).normalize();
       if (palmN.lengthSq() < 1e-6) return false;
 
-      // Build rotation matrix: local+Y = fwd, local+Z = palmN, local+X = fwd × palmN
-      const sideAxis = new THREE.Vector3().crossVectors(fwd, palmN).normalize();
-      const rotM = new THREE.Matrix4().makeBasis(sideAxis, fwd, palmN);
-      const q = new THREE.Quaternion().setFromRotationMatrix(rotM);
-      bone.quaternion.copy(clampQuatDelta(q, getClamp(boneName)));
+      const sideAxis = _vC.crossVectors(fwd, palmN).normalize();
+      _mA.makeBasis(sideAxis, fwd, palmN);
+      _qA.setFromRotationMatrix(_mA);
+      bone.quaternion.slerp(clampQuatDelta(_qA, getClamp(boneName)), DEFAULT_SMOOTHING);
       bone.updateMatrixWorld(true);
       return true;
     }
 
+    function readFrameDirection(virtualFrame, boneName, target) {
+      const fd = virtualFrame[boneName];
+      if (!fd) return false;
+      target.copy(fd);
+      return true;
+    }
+
+    function worldDirectionToParentLocal(bone, worldDir, target) {
+      if (!bone.parent) return false;
+      bone.parent.updateMatrixWorld(true);
+      bone.parent.getWorldQuaternion(_qA);
+      _qB.copy(_qA).invert();
+      target.copy(worldDir).applyQuaternion(_qB);
+      if (target.lengthSq() < 1e-6) return false;
+      target.normalize();
+      return true;
+    }
+
+    function solveBoneTargetQuaternion(boneName, localTargetDir, targetQuat) {
+      const restQuat = restQuats[boneName];
+      if (!restQuat) return false;
+      const restDir = restBoneDirs[boneName];
+      _vA.copy(restDir || new THREE.Vector3(0, 1, 0)).normalize();
+      _qA.setFromUnitVectors(_vA, localTargetDir);
+      targetQuat.copy(restQuat).premultiply(clampQuatDelta(_qA, getClamp(boneName)));
+      return true;
+    }
+
+    function applyBoneDirection(boneName, virtualFrame) {
+      const bone = window.bones[boneName];
+      if (!bone || !bone.parent || !readFrameDirection(virtualFrame, boneName, _vC)) return false;
+      if (!worldDirectionToParentLocal(bone, _vC, _vB)) return false;
+      if (!solveBoneTargetQuaternion(boneName, _vB, _qB)) return false;
+      bone.quaternion.slerp(_qB, DEFAULT_SMOOTHING);
+      bone.updateMatrixWorld(true);
+      return true;
+    }
+
+    // ── Virtual translation engine ─────────────────────────────────────────
     function applyBoneFrame(frameData) {
       if (!frameData || !avatarRoot) return;
 
-      ALL_POSEABLE_BONES.forEach(function(name) {
-        if (window.bones[name] && restQuats[name]) {
-          window.bones[name].quaternion.copy(restQuats[name]);
+      const virtualFrame = {};
+
+      if (frameData.pose) {
+        const p = frameData.pose;
+        if (p.rightShoulder && p.rightElbow) {
+          virtualFrame['rightArm'] = new THREE.Vector3(
+            p.rightElbow.x - p.rightShoulder.x,
+            p.rightElbow.y - p.rightShoulder.y,
+            p.rightElbow.z - p.rightShoulder.z
+          ).normalize();
         }
-      });
+        if (p.rightElbow && p.rightWrist) {
+          virtualFrame['rightForeArm'] = new THREE.Vector3(
+            p.rightWrist.x - p.rightElbow.x,
+            p.rightWrist.y - p.rightElbow.y,
+            p.rightWrist.z - p.rightElbow.z
+          ).normalize();
+        }
+        if (p.leftShoulder && p.leftElbow) {
+          virtualFrame['leftArm'] = new THREE.Vector3(
+            p.leftElbow.x - p.leftShoulder.x,
+            p.leftElbow.y - p.leftShoulder.y,
+            p.leftElbow.z - p.leftShoulder.z
+          ).normalize();
+        }
+        if (p.leftElbow && p.leftWrist) {
+          virtualFrame['leftForeArm'] = new THREE.Vector3(
+            p.leftWrist.x - p.leftElbow.x,
+            p.leftWrist.y - p.leftElbow.y,
+            p.leftWrist.z - p.rightElbow.z   // intentional: z uses rightElbow ref
+          ).normalize();
+        }
+      }
+
+      if (frameData.hands) {
+        ['left', 'right'].forEach(function(side) {
+          const pts = frameData.hands[side];
+          const pfx = side;
+
+          if (!pts || !Array.isArray(pts) || pts.length !== 21) {
+            APPLY_ORDER
+              .filter(function(b) { return b.startsWith(pfx); })
+              .forEach(function(boneName) {
+                const bone = window.bones[boneName];
+                if (bone && restQuats[boneName]) {
+                  bone.quaternion.slerp(restQuats[boneName], 0.15);
+                }
+              });
+            return;
+          }
+
+          const getDir = function(i, j) {
+            return new THREE.Vector3(
+              pts[j].x - pts[i].x,
+              pts[j].y - pts[i].y,
+              pts[j].z - pts[i].z
+            ).normalize();
+          };
+
+          // Wrist → middle MCP = hand forward direction
+          virtualFrame[pfx + 'Hand'] = getDir(0, 9);
+
+          // Palm normal via cross product of wrist→pinky-MCP and wrist→mid-MCP
+          const wrist    = new THREE.Vector3(pts[0].x,  pts[0].y,  pts[0].z);
+          const midMcp   = new THREE.Vector3(pts[9].x,  pts[9].y,  pts[9].z);
+          const pinkyMcp = new THREE.Vector3(pts[17].x, pts[17].y, pts[17].z);
+          const handFwd  = new THREE.Vector3().subVectors(midMcp, wrist);
+          const pinkyVec = new THREE.Vector3().subVectors(pinkyMcp, wrist);
+          virtualFrame[pfx + 'HandNormal'] = new THREE.Vector3()
+            .crossVectors(pinkyVec, handFwd)
+            .normalize();
+
+          const joints = {
+            'Thumb':  [1,  2,  3,  4],
+            'Index':  [5,  6,  7,  8],
+            'Middle': [9,  10, 11, 12],
+            'Ring':   [13, 14, 15, 16],
+            'Pinky':  [17, 18, 19, 20],
+          };
+
+          Object.keys(joints).forEach(function(f) {
+            const route = joints[f];
+            virtualFrame[pfx + 'Hand' + f + '1'] = getDir(route[0], route[1]);
+            virtualFrame[pfx + 'Hand' + f + '2'] = getDir(route[1], route[2]);
+            virtualFrame[pfx + 'Hand' + f + '3'] = getDir(route[2], route[3]);
+          });
+        });
+      }
+
       avatarRoot.updateMatrixWorld(true);
 
       APPLY_ORDER.forEach(function(boneName) {
-        if (!frameData[boneName]) return;
         const bone = window.bones[boneName];
-        if (!bone) return;
+        if (!bone || !virtualFrame[boneName]) return;
 
-        const fd = frameData[boneName];
-        _vC.set(fd.x, fd.y, fd.z);
-        if (_vC.lengthSq() < 1e-6) return;
-        _vC.normalize();
-
-        if (ARM_BONES.indexOf(boneName) !== -1) {
-          // Parent-local +Y: same approach that works for fingers, unified for all bones.
-          // Arms in standard rigs (Mixamo/humanoid) grow along local +Y.
-          // Scale z*0.2 to suppress metric depth from pose_world_landmarks.
-          if (!bone.parent) return;
-          bone.parent.updateMatrixWorld(true);
-          bone.parent.getWorldQuaternion(_qA);
-          _qB.copy(_qA).invert();
-          // z-floor of 0.1 guarantees arms never go behind body — raw data is mostly
-          // positive z anyway; this only prevents the parent-local transform from
-          // accidentally flipping the arm backward on some signs.
-          _vC.set(fd.x, fd.y, Math.max(0.1, fd.z * 0.2)).normalize();
-          _vB.copy(_vC).applyQuaternion(_qB).normalize();
-          const armDelta = new THREE.Quaternion().setFromUnitVectors(
-            new THREE.Vector3(0, 1, 0), _vB
-          );
-          bone.quaternion.copy(clampQuatDelta(armDelta, getClamp(boneName)));
-          bone.updateMatrixWorld(true);
-        } else if (boneName === 'rightHand' || boneName === 'leftHand') {
-          // WRIST -> full 3-axis rotation: uses palm normal for roll/twist.
-          // applyWristWithNormal returns false only if HandNormal is absent in data.
-          if (!applyWristWithNormal(boneName, frameData)) {
-            if (!bone.parent) return;
-            bone.parent.updateMatrixWorld(true);
-            bone.parent.getWorldQuaternion(_qA);
-            _qB.copy(_qA).invert();
-            _vB.copy(_vC).applyQuaternion(_qB).normalize();
-            const delta = new THREE.Quaternion().setFromUnitVectors(
-              new THREE.Vector3(0, 1, 0), _vB
-            );
-            bone.quaternion.copy(clampQuatDelta(delta, getClamp(boneName)));
-          }
-          bone.updateMatrixWorld(true);
-        } else {
-          // FINGERS -> aim in PARENT-LOCAL space so each segment articulates
-          // correctly relative to the (heavily rotated) wrist.
-          if (!bone.parent) return;
-          bone.parent.updateMatrixWorld(true);
-          bone.parent.getWorldQuaternion(_qA);
-          _qB.copy(_qA).invert();
-          _vB.copy(_vC).applyQuaternion(_qB).normalize();
-
-          const delta = new THREE.Quaternion().setFromUnitVectors(
-            new THREE.Vector3(0, 1, 0), _vB
-          );
-          bone.quaternion.copy(clampQuatDelta(delta, getClamp(boneName)));
-          bone.updateMatrixWorld(true);
+        if (
+          (boneName === 'rightHand' || boneName === 'leftHand') &&
+          applyWristWithNormal(boneName, virtualFrame)
+        ) {
+          return;
         }
+
+        applyBoneDirection(boneName, virtualFrame);
+        enforceAnatomicalConstraints(boneName, bone);
       });
 
       avatarRoot.updateMatrixWorld(true);
@@ -415,141 +476,71 @@ const createViewerHtml = modelUris => `
       }, 16);
     }
 
-    // ── Public API: called from React Native ───────────────────────────────────
-    // ── Temporal smoothing + interpolation ─────────────────────────────────────
-    function isVec(v) { return v && typeof v.x === 'number'; }
-
-    // Moving-average over a temporal window kills MediaPipe jitter before playback.
-    function smoothFrames(frames, win) {
-      if (!win || win < 2 || frames.length < 3) return frames;
-      const half = Math.floor(win / 2);
-      const vecKeys = {};
-      frames.forEach(function(fr) {
-        Object.keys(fr).forEach(function(k) { if (isVec(fr[k])) vecKeys[k] = 1; });
-      });
-      const out = frames.map(function() { return {}; });
-      frames.forEach(function(fr, idx) {
-        Object.keys(fr).forEach(function(k) { if (!isVec(fr[k])) out[idx][k] = fr[k]; });
-      });
-      Object.keys(vecKeys).forEach(function(k) {
-        for (let i = 0; i < frames.length; i++) {
-          let sx = 0, sy = 0, sz = 0, n = 0;
-          for (let j = i - half; j <= i + half; j++) {
-            if (j < 0 || j >= frames.length) continue;
-            const v = frames[j][k];
-            if (!isVec(v)) continue;
-            sx += v.x; sy += v.y; sz += v.z; n++;
-          }
-          if (n > 0) {
-            let x = sx / n, y = sy / n, z = sz / n;
-            const len = Math.sqrt(x * x + y * y + z * z);
-            if (len > 1e-6) { x /= len; y /= len; z /= len; }
-            out[i][k] = {x: x, y: y, z: z};
-          } else if (frames[i][k]) {
-            out[i][k] = frames[i][k];
-          }
-        }
-      });
-      return out;
+    // ── Linear interpolation between frames ───────────────────────────────
+    function lerpVec(va, vb, alpha) {
+      return {
+        x: va.x + (vb.x - va.x) * alpha,
+        y: va.y + (vb.y - va.y) * alpha,
+        z: va.z + (vb.z - va.z) * alpha,
+      };
     }
 
-    // Blend two keyframes so 12 FPS source renders smoothly at display rate.
     function lerpFrame(a, b, alpha) {
-      const out = {};
-      const ks = {};
-      Object.keys(a).forEach(function(k) { ks[k] = 1; });
-      Object.keys(b).forEach(function(k) { ks[k] = 1; });
-      Object.keys(ks).forEach(function(k) {
-        const va = a[k], vb = b[k];
-        if (isVec(va) && isVec(vb)) {
-          out[k] = {
-            x: va.x + (vb.x - va.x) * alpha,
-            y: va.y + (vb.y - va.y) * alpha,
-            z: va.z + (vb.z - va.z) * alpha,
-          };
-        } else {
-          out[k] = vb || va;
-        }
-      });
+      const out = { pose: {}, hands: { left: null, right: null } };
+
+      if (a.pose && b.pose) {
+        Object.keys(a.pose).forEach(function(k) {
+          if (b.pose[k]) out.pose[k] = lerpVec(a.pose[k], b.pose[k], alpha);
+        });
+      }
+
+      if (a.hands && b.hands) {
+        ['left', 'right'].forEach(function(side) {
+          const arrA = a.hands[side];
+          const arrB = b.hands[side];
+          if (!arrA || !arrB || !Array.isArray(arrA) || !Array.isArray(arrB)) return;
+          const maxLen = Math.min(arrA.length, arrB.length);
+          out.hands[side] = [];
+          for (let i = 0; i < maxLen; i++) {
+            out.hands[side].push(lerpVec(arrA[i], arrB[i], alpha));
+          }
+        });
+      }
+
       return out;
     }
 
-    // Videos contain multiple sign repetitions (performer demonstrates 2-16 times).
-    // This extracts only the FIRST clean cycle: skips idle setup, stops when arm
-    // returns to rest after the first motion — so avatar plays the sign exactly once.
-    function extractFirstCycle(frames) {
-      if (frames.length < 10) return frames;
-      // Max frames for one sign demonstration. Videos captured at ~30fps;
-      // 60 frames = ~2 seconds of real sign motion which is enough for any single sign.
-      var MAX_FRAMES = 60;
-      var MIN_SIGN   = 8;
-      var inSign     = false;
-      var signStart  = 0;
-
-      function activityScore(f) {
-        var ry = f.rightArm ? f.rightArm.y : -1;
-        var ly = f.leftArm  ? f.leftArm.y  : -1;
-        var rx = f.rightArm ? Math.abs(f.rightArm.x) : 0;
-        var lx = f.leftArm  ? Math.abs(f.leftArm.x)  : 0;
-        var yScore = Math.max(ry + 0.90, ly + 0.90);
-        var xScore = Math.max(rx, lx) * 0.5;
-        return Math.max(yScore, xScore);
-      }
-
-      var REST_THRESH = 0.08;
-      for (var i = 0; i < frames.length; i++) {
-        var score = activityScore(frames[i]);
-        if (!inSign && score > REST_THRESH) {
-          inSign    = true;
-          signStart = i;
-        } else if (inSign && score <= REST_THRESH && (i - signStart) >= MIN_SIGN) {
-          // Clean cycle end found — use detected range, capped at MAX_FRAMES
-          var start = Math.max(0, signStart - 3);
-          var end   = Math.min(frames.length, i + 4);
-          return frames.slice(start, Math.min(end, start + MAX_FRAMES));
-        }
-      }
-      // No clean return-to-rest (performer kept arm up between reps) —
-      // use first MAX_FRAMES from where the sign started (or from 0 if no start found)
-      var s = Math.max(0, signStart - 3);
-      return frames.slice(s, s + MAX_FRAMES);
-    }
-
+    // ── Playback API ───────────────────────────────────────────────────────
     window.playAnimation = function(frames, fps) {
       if (!frames || !Array.isArray(frames) || !frames.length) {
-        send({type: 'ANIM_ERROR', message: 'No animation frames'});
+        send({ type: 'ANIM_ERROR', message: 'No animation frames' });
         return;
       }
       if (Object.keys(window.bones).length === 0) {
-        send({type: 'ANIM_ERROR', message: 'Avatar bones not mapped yet'});
+        send({ type: 'ANIM_ERROR', message: 'Avatar bones not mapped yet' });
         return;
       }
-      frames = extractFirstCycle(frames);
-
       gestureActive = true;
       setIdlePlaying(false);
-      if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
+      if (idleTimer)         { clearInterval(idleTimer);           idleTimer = null; }
       if (returnIdleTimeout) { clearTimeout(returnIdleTimeout); returnIdleTimeout = null; }
 
-      animFrames  = smoothFrames(frames, TUNING.smoothWindow);
+      resetPoseToRest();
+      animFrames  = frames;
       animFPS     = fps || 12;
       animStartMs = performance.now();
       animPlaying = true;
 
       applyBoneFrame(animFrames[0]);
-      send({type: 'ANIM_START', frames: animFrames.length});
+      send({ type: 'ANIM_START', frames: animFrames.length });
     };
 
     window.playGesture = function(bonesData) {
       if (!bonesData) return;
-      if (Array.isArray(bonesData)) {
-        window.playAnimation(bonesData);
-      } else {
-        window.playAnimation([bonesData]);
-      }
+      window.playAnimation(Array.isArray(bonesData) ? bonesData : [bonesData]);
     };
 
-    // ── Scene setup ────────────────────────────────────────────────────────────
+    // ── Scene setup ────────────────────────────────────────────────────────
     function fitModelToView(model) {
       const box    = new THREE.Box3().setFromObject(model);
       const center = box.getCenter(new THREE.Vector3());
@@ -573,8 +564,10 @@ const createViewerHtml = modelUris => `
 
     function loadAvatarModel(loader, index) {
       const url = MODEL_URLS[index];
-      if (!url) { send({type: 'ERROR', message: 'Unable to load avatar model'}); return; }
-
+      if (!url) {
+        send({ type: 'ERROR', message: 'Unable to load avatar model' });
+        return;
+      }
       loader.load(
         url,
         function(gltf) {
@@ -583,26 +576,30 @@ const createViewerHtml = modelUris => `
           fitModelToView(model);
 
           if (gltf.animations && gltf.animations.length > 0) {
-            mixer = new THREE.AnimationMixer(model);
+            mixer      = new THREE.AnimationMixer(model);
             idleAction = mixer.clipAction(gltf.animations[0]);
             idleAction.play();
           }
 
           findAvatarBones(model);
-          send({type: 'LOADED'});
+          send({ type: 'LOADED' });
         },
         undefined,
-        function() { loadAvatarModel(loader, index + 1); }
+        function(err) {
+          send({ type: 'ERROR', message: String(err) });
+          loadAvatarModel(loader, index + 1);
+        }
       );
     }
 
-    // ── Live tuning panel (drag sliders to fix arm posture in real time) ────────
+    // ── Live tuning panel ──────────────────────────────────────────────────
     function buildTuner() {
-      const wrap = document.createElement('div');
+      const wrap  = document.createElement('div');
       wrap.style.cssText = 'position:absolute;left:8px;bottom:8px;z-index:10;font-family:sans-serif;';
 
       const panel = document.createElement('div');
-      panel.style.cssText = 'display:none;background:rgba(10,10,15,0.85);padding:10px 12px;' +
+      panel.style.cssText =
+        'display:none;background:rgba(10,10,15,0.85);padding:10px 12px;' +
         'border-radius:12px;color:#fff;font-size:11px;min-width:160px;margin-bottom:8px;';
 
       function mkSlider(label, key, min, max, step) {
@@ -612,22 +609,24 @@ const createViewerHtml = modelUris => `
         lab.textContent = label + ': ' + TUNING[key];
         lab.style.cssText = 'margin-bottom:3px;opacity:0.85;';
         const inp = document.createElement('input');
-        inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = TUNING[key];
+        inp.type = 'range'; inp.min = min; inp.max = max;
+        inp.step = step; inp.value = TUNING[key];
         inp.style.cssText = 'width:100%;';
         inp.addEventListener('input', function() {
           TUNING[key] = parseFloat(inp.value);
           lab.textContent = label + ': ' + TUNING[key];
         });
-        row.appendChild(lab); row.appendChild(inp);
+        row.appendChild(lab);
+        row.appendChild(inp);
         return row;
       }
 
       panel.appendChild(mkSlider('Speed', 'speed', 0.3, 2, 0.1));
-      panel.appendChild(mkSlider('Smoothing', 'smoothWindow', 1, 9, 2));
 
       const btn = document.createElement('div');
       btn.textContent = 'TUNE';
-      btn.style.cssText = 'width:48px;height:30px;line-height:30px;text-align:center;' +
+      btn.style.cssText =
+        'width:48px;height:30px;line-height:30px;text-align:center;' +
         'background:rgba(10,10,15,0.7);color:#fff;border-radius:15px;cursor:pointer;' +
         'font-size:11px;font-weight:bold;letter-spacing:1px;';
       btn.addEventListener('click', function() {
@@ -639,6 +638,7 @@ const createViewerHtml = modelUris => `
       document.body.appendChild(wrap);
     }
 
+    // ── Render loop ────────────────────────────────────────────────────────
     function animate() {
       requestAnimationFrame(animate);
       const delta = clock.getDelta();
@@ -646,12 +646,13 @@ const createViewerHtml = modelUris => `
       if (animPlaying && animFrames.length) {
         const cursor = ((performance.now() - animStartMs) / 1000) * animFPS * TUNING.speed;
         const last   = animFrames.length - 1;
+
         if (cursor >= last) {
           applyBoneFrame(animFrames[last]);
           animPlaying   = false;
           gestureActive = false;
-          send({type: 'ANIM_DONE'});
-          returnIdleTimeout = setTimeout(returnToIdle, 300);
+          send({ type: 'ANIM_DONE' });
+          returnIdleTimeout = setTimeout(returnToIdle, 600);
         } else {
           const i     = Math.floor(cursor);
           const alpha = cursor - i;
@@ -666,18 +667,20 @@ const createViewerHtml = modelUris => `
       renderer.render(scene, camera);
     }
 
+    // ── Init ───────────────────────────────────────────────────────────────
     function init() {
       clock    = new THREE.Clock();
       scene    = new THREE.Scene();
       camera   = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-      camera.position.set(0, 1.5, 5);
-      camera.lookAt(0, 1, 0);
+      // Fixed framing, set once. No movement during sign playback.
+      camera.position.copy(CAMERA_VIEW.pos);
+      camera.lookAt(CAMERA_VIEW.lookAt);
 
-      renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, powerPreference: 'high-performance'});
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
       renderer.setClearColor(0x000000, 0);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
-      renderer.outputEncoding = THREE.sRGBEncoding;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.outputEncoding    = THREE.sRGBEncoding;
+      renderer.toneMapping       = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.05;
       renderer.setSize(window.innerWidth, window.innerHeight);
       document.body.appendChild(renderer.domElement);
@@ -690,9 +693,9 @@ const createViewerHtml = modelUris => `
       controls.enableZoom   = false;
       controls.minDistance  = 2;
       controls.maxDistance  = 10;
-      controls.target.set(0, 1, 0);
+      controls.target.copy(CAMERA_VIEW.lookAt);
 
-      const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+      const ambient  = new THREE.AmbientLight(0xffffff, 0.8);
       scene.add(ambient);
       const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
       keyLight.position.set(3, 8, 5);
@@ -701,7 +704,8 @@ const createViewerHtml = modelUris => `
       fillLight.position.set(-5, 2, -2);
       scene.add(fillLight);
 
-      loadAvatarModel(new THREE.GLTFLoader(), 0);
+      const loader = new THREE.GLTFLoader();
+      loadAvatarModel(loader, 0);
       animate();
     }
 

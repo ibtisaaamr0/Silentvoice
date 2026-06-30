@@ -1,18 +1,23 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import numpy as np
 import cv2
 import base64
 import os
-
-from gesture import GestureRecognizer
-from voice import speech_to_text, translate_text
-from labels_urdu import translate as translate_label   # 👈 NEW
+import urllib.parse
 
 app = Flask(__name__)
 CORS(app)
 
-detector = GestureRecognizer()
+try:
+    from gesture import GestureRecognizer
+    from voice import speech_to_text, translate_text
+    from labels_urdu import translate as translate_label
+    detector = GestureRecognizer()
+    ML_READY = True
+except Exception as e:
+    print(f"[WARN] ML modules not loaded: {e}")
+    ML_READY = False
 
 
 # =========================
@@ -28,9 +33,13 @@ def decode_image(data):
         return None
 
 
-
+# =========================
+# GESTURE VIDEO ROUTE
+# =========================
 @app.route("/gesture-video", methods=["POST"])
 def gesture_video():
+    if not ML_READY:
+        return jsonify({"error": "ML modules unavailable"})
     if 'file' not in request.files:
         return jsonify({"error": "No video file"})
 
@@ -50,12 +59,14 @@ def gesture_video():
         "display": display
     })
 
+
 # =========================
 # VOICE ROUTE
 # =========================
 @app.route("/voice", methods=["POST"])
 def voice():
-
+    if not ML_READY:
+        return jsonify({"error": "ML modules unavailable"})
     if 'file' not in request.files:
         return jsonify({"error": "No audio file"})
 
@@ -78,6 +89,61 @@ def voice():
         "translated": translated,
         "lang": lang
     })
+
+
+# =========================
+# VIDEO SERVE (range-request streaming)
+# =========================
+@app.route("/video/<path:filepath>", methods=["GET"])
+def serve_video(filepath):
+    # Safely handle encoded spaces (%20) or characters passed down by your front-end components
+    decoded_filepath = urllib.parse.unquote(filepath)
+    
+    # Auto-append extension if the route payload skips it
+    if not decoded_filepath.lower().endswith('.mp4'):
+        decoded_filepath += '.mp4'
+
+    video_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "videos")
+    path = os.path.abspath(os.path.join(video_dir, decoded_filepath))
+    
+    # Directory Traversal Guard (Make sure the target path stays inside the intended folder)
+    if not path.startswith(os.path.abspath(video_dir)):
+        return "Access Denied", 403
+
+    if not os.path.isfile(path):
+        return "Not found", 404
+
+    size = os.path.getsize(path)
+    range_header = request.headers.get("Range")
+
+    if range_header:
+        ranges = range_header.replace("bytes=", "").split("-")
+        start = int(ranges[0])
+        end = int(ranges[1]) if ranges[1] else size - 1
+    else:
+        start, end = 0, size - 1
+
+    length = end - start + 1
+
+    def stream():
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = f.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    status = 206 if range_header else 200
+    headers = {
+        "Content-Type": "video/mp4",
+        "Content-Length": str(length),
+        "Content-Range": f"bytes {start}-{end}/{size}",
+        "Accept-Ranges": "bytes",
+    }
+    return Response(stream(), status=status, headers=headers)
 
 
 # =========================

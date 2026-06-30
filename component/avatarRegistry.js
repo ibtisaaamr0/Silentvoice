@@ -1,5 +1,6 @@
 // Central registry for all avatar models.
-// require() calls must be static strings — Metro resolves them at bundle time.
+// Models live in android/app/src/main/assets/models/ and are loaded directly
+// by the WebView via the file:///android_asset/ scheme — no Metro/network fetch needed.
 
 export const AVATARS = [
   {
@@ -32,23 +33,12 @@ export const AVATARS = [
   },
 ];
 
-export const MODEL_REQUIRES = {
-  classic: require('../assets/models/avatar_model.glb'),
-  old: require('../assets/models/old-modal.glb'),
-  kid: require('../assets/models/kid-model.glb'),
-  women: require('../assets/models/women-modal.glb'),
-};
-
+// file:///android_asset/ is the correct, WebView-resolvable scheme for reading
+// files bundled under android/app/src/main/assets/. This is the ONLY uri used now —
+// no Metro fallback, no network fetch, so loading is fast and works offline.
 export const ANDROID_ASSET_URIS = {
-  classic: 'file:///android_asset/avatar_model.glb',
-  old: 'file:///android_asset/old-modal.glb',
-  kid: 'file:///android_asset/kid-model.glb',
-  women: 'file:///android_asset/women-modal.glb',
-};
-
-export const METRO_FALLBACK_URIS = {
-  classic: 'http://10.0.2.2:8081/assets/assets/models/avatar_model.glb',
-  old: 'http://10.0.2.2:8081/assets/assets/models/old-modal.glb',
-  kid: 'http://10.0.2.2:8081/assets/assets/models/kid-model.glb',
-  women: 'http://10.0.2.2:8081/assets/assets/models/women-modal.glb',
+  classic: 'file:///android_asset/models/avatar_model.glb',
+  old: 'file:///android_asset/models/old-modal.glb',
+  kid: 'file:///android_asset/models/kid-model.glb',
+  women: 'file:///android_asset/models/women-modal.glb',
 };

@@ -1,11 +1,11 @@
 // Fuzzy matcher: finds the best sign name in the PSL library for a spoken phrase.
 // Tries exact → substring → word subset → word overlap before giving up.
+// Accepts `keys` as an array of sign-label strings (matches psl_index.json shape).
 
-export function findBestMatch(spoken, library) {
+export function findBestMatch(spoken, keys) {
   const normalized = spoken.toLowerCase().trim();
-  const keys = Object.keys(library);
 
-  if (library[normalized]) return normalized;
+  if (keys.includes(normalized)) return normalized;
 
   const containsMatch = keys.find(k => normalized.includes(k));
   if (containsMatch) return containsMatch;

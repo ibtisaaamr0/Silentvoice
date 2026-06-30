@@ -6,7 +6,6 @@ from collections import deque, Counter
 
 
 def normalize_landmarks(landmarks_flat):
-    """Must match the normalization used during training exactly."""
     landmarks = np.array(landmarks_flat).reshape(21, 3)
     wrist = landmarks[0].copy()
     landmarks = landmarks - wrist
