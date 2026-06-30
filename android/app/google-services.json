@@ -62,6 +62,35 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1046134350763:android:8cac611592608338b368ee",
+        "android_client_info": {
+          "package_name": "com.silentvoice2"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1046134350763-bafhil46d3ft7uqobqm7hrvlr0vadv7n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABU7hO89wNAj22VzWpnfF64GIjtTl1xo8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1046134350763-bafhil46d3ft7uqobqm7hrvlr0vadv7n.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"
