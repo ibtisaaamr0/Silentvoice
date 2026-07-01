@@ -285,7 +285,7 @@ export default function Avatar() {
     // 3. Fallback: Split by word for both English sentences or Urdu sentences
     const words = cleanedText.split(/\s+/);
     const translatedWords = words.map(w => URDU_TO_ENG[w] || w);
-    
+
     const matched = translatedWords
       .map(w => findBestMatch(w, libraryKeys))
       .filter(Boolean);
@@ -424,10 +424,18 @@ export default function Avatar() {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       switch (data.type) {
+        case 'BONES':
+          console.log("===== BONES FOUND =====");
+          console.log("Bone count:", data.count);
+          console.log("Bone names:", data.names);
+
+          setBoneCount(data.count);
+
+          break;
         case 'LOADED':
           setIsLoaded(true);
           setLoadError('');
-          if(data.bones) setBoneCount(data.bones);
+          if (data.bones) setBoneCount(data.bones);
           break;
         case 'ERROR':
           setLoadError(data.message || 'Avatar load failed');
@@ -441,6 +449,9 @@ export default function Avatar() {
           break;
         case 'ANIM_START':
           setIsPlaying(true);
+          break;
+        case 'DEBUG':
+          console.log('WEBVIEW:', data.message);
           break;
       }
     } catch {
@@ -474,7 +485,7 @@ export default function Avatar() {
         style={ss.scroll}
         contentContainerStyle={ss.content}
         showsVerticalScrollIndicator={false}>
-        
+
         {/* Header */}
         <View style={ss.header}>
           <View style={ss.headerCopy}>
